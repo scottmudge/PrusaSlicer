@@ -1223,7 +1223,7 @@ Vec3d extract_euler_angles(const Eigen::Matrix<double, 3, 3, Eigen::DontAlign>& 
     // reference: http://www.gregslabaugh.net/publications/euler.pdf
     Vec3d angles1 = Vec3d::Zero();
     Vec3d angles2 = Vec3d::Zero();
-    if (is_approx(std::abs(rotation_matrix(2, 0)), 1.0))
+    if (std::abs(rotation_matrix(2, 0)) == 1.0)
     {
         angles1(2) = 0.0;
         if (rotation_matrix(2, 0) < 0.0) // == -1.0
@@ -1240,15 +1240,19 @@ Vec3d extract_euler_angles(const Eigen::Matrix<double, 3, 3, Eigen::DontAlign>& 
     }
     else
     {
-        angles1(1) = -::asin(rotation_matrix(2, 0));
-        double inv_cos1 = 1.0 / ::cos(angles1(1));
-        angles1(0) = ::atan2(rotation_matrix(2, 1) * inv_cos1, rotation_matrix(2, 2) * inv_cos1);
-        angles1(2) = ::atan2(rotation_matrix(1, 0) * inv_cos1, rotation_matrix(0, 0) * inv_cos1);
-
+        // When the asin argument is close to 1/-1, the result may not be precise. Do we care?
+        // Solving this in the other case is even worth though, it is equivalent to
+        // assuming it actually IS 1/-1.
+        angles1(1) = -std::asin(rotation_matrix(2, 0));
         angles2(1) = (double)PI - angles1(1);
-        double inv_cos2 = 1.0 / ::cos(angles2(1));
-        angles2(0) = ::atan2(rotation_matrix(2, 1) * inv_cos2, rotation_matrix(2, 2) * inv_cos2);
-        angles2(2) = ::atan2(rotation_matrix(1, 0) * inv_cos2, rotation_matrix(0, 0) * inv_cos2);
+
+        double cos_sign = std::cos(angles1(1)) > 0. ? 1. : -1.;
+        angles1(0) = ::atan2(rotation_matrix(2, 1) * cos_sign, rotation_matrix(2, 2) * cos_sign);
+        angles1(2) = ::atan2(rotation_matrix(1, 0) * cos_sign, rotation_matrix(0, 0) * cos_sign);
+
+        cos_sign = std::cos(angles2(1)) > 0. ? 1. : -1.;
+        angles2(0) = ::atan2(rotation_matrix(2, 1) * cos_sign, rotation_matrix(2, 2) * cos_sign);
+        angles2(2) = ::atan2(rotation_matrix(1, 0) * cos_sign, rotation_matrix(0, 0) * cos_sign);
     }
 
     // The following euristic is the best found up to now (in the sense that it works fine with the greatest number of edge use-cases)
@@ -1329,8 +1333,6 @@ void Transformation::set_rotation(const Vec3d& rotation)
 void Transformation::set_rotation(Axis axis, double rotation)
 {
     rotation = angle_to_0_2PI(rotation);
-    if (is_approx(std::abs(rotation), 2.0 * (double)PI))
-        rotation = 0.0;
 
     if (m_rotation(axis) != rotation)
     {

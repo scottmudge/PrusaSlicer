@@ -284,16 +284,19 @@ double rad2deg_dir(double angle);
 template<typename T> constexpr T deg2rad(const T angle) { return T(PI) * angle / T(180.0); }
 template<typename T> T angle_to_0_2PI(T angle)
 {
-    static const T TWO_PI = T(2) * T(PI);
-    while (angle < T(0))
-    {
-        angle += TWO_PI;
-    }
-    while (TWO_PI < angle)
-    {
-        angle -= TWO_PI;
-    }
+    // Wraps an angle in radians into [0; 2pi) interval.
 
+    static_assert(std::is_same<T, double>::value
+               || std::is_same<T, long double>::value
+               || std::is_same<T, float>::value,
+                  "Floating-point type is expected.");
+
+    static const T TWO_PI = T(2) * T(PI);
+    angle = std::fmod(angle, TWO_PI);
+    if (angle < T(0))
+        angle += TWO_PI;
+    if (angle == TWO_PI)
+        angle = 0.;
     return angle;
 }
 
