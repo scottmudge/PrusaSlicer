@@ -99,10 +99,12 @@ void RemovableDriveManager::eject_drive()
 		DWORD deviceControlRetVal(0);
 		//these 3 commands should eject device safely but they dont, the device does disappear from file explorer but the "device was safely remove" notification doesnt trigger.
 		//sd cards does  trigger WM_DEVICECHANGE messege, usb drives dont
+		/*
 		BOOL e1 = DeviceIoControl(handle, FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0, &deviceControlRetVal, nullptr);
 		BOOST_LOG_TRIVIAL(debug) << "FSCTL_LOCK_VOLUME " << e1 << " ; " << deviceControlRetVal << " ; " << GetLastError();
 		BOOL e2 = DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0, &deviceControlRetVal, nullptr);
 		BOOST_LOG_TRIVIAL(debug) << "FSCTL_DISMOUNT_VOLUME " << e2 << " ; " << deviceControlRetVal << " ; " << GetLastError();
+		*/
 		// some implemenatations also calls IOCTL_STORAGE_MEDIA_REMOVAL here but it returns error to me
 		BOOL error = DeviceIoControl(handle, IOCTL_STORAGE_EJECT_MEDIA, nullptr, 0, nullptr, 0, &deviceControlRetVal, nullptr);
 		if (error == 0) {
