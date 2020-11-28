@@ -2303,8 +2303,14 @@ void ObjectList::del_subobject_item(wxDataViewItem& item)
 
     m_objects_model->Delete(item);
 
+    // ys_FIXME. Linux issue : 
+    // When we show this message the queue of events is changed and it tends a crash.
+    // It looks like we trying to check item(s) which are not exist for this moment.
+    // So, as a workaround don't use this info msg till better solution wasn't found
+#ifndef __Linux__
     if (show_msg)
         Slic3r::GUI::show_error(nullptr, _(L("Last instance of an object cannot be deleted.")));
+#endif
 }
 
 void ObjectList::del_settings_from_config(const wxDataViewItem& parent_item)
@@ -3062,7 +3068,13 @@ void ObjectList::delete_object_from_list()
 
 void ObjectList::delete_object_from_list(const size_t obj_idx)
 {
-    select_item(m_objects_model->Delete(m_objects_model->GetItemById(obj_idx)));
+    // Linux specific: see https://github.com/prusa3d/PrusaSlicer/issues/5191
+    // ItemDeleted() function invokes wxEVT_DATAVIEW_SELECTION_CHANGED, which tends queue of all another non-needed functions
+    // We shouldn't update selections till all items wasn't deleted, so use m_prevent_list_events
+    m_prevent_list_events = true;
+    wxDataViewItem item = m_objects_model->Delete(m_objects_model->GetItemById(obj_idx));
+    m_prevent_list_events = false;
+    select_item(item);
 }
 
 void ObjectList::delete_volume_from_list(const size_t obj_idx, const size_t vol_idx)
@@ -3220,12 +3232,17 @@ void ObjectList::remove()
     {
         Plater::TakeSnapshot snapshot = Plater::TakeSnapshot(wxGetApp().plater(), _(L("Delete Selected")));
 
+        // Linux specific: see https://github.com/prusa3d/PrusaSlicer/issues/5191
+        // ItemDeleted() function invokes wxEVT_DATAVIEW_SELECTION_CHANGED, which tends queue of all another non-needed functions
+        // We shouldn't update selections till all items wasn't deleted, so use m_prevent_list_events
+        m_prevent_list_events = true;
         for (auto& item : sels)
         {
             if (m_objects_model->InvalidItem(item)) // item can be deleted for this moment (like last 2 Instances or Volumes)
                 continue;
             parent = delete_item(item);
         }
+        m_prevent_list_events = false;
     }
 
     if (parent && !m_objects_model->InvalidItem(parent)) {
