@@ -3,14 +3,17 @@
 #include "GUI_Init.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GUI_ObjectManipulation.hpp"
+#include "format.hpp"
 #include "I18N.hpp"
 
 #include <algorithm>
 #include <iterator>
 #include <exception>
 #include <cstdlib>
-#include <boost/lexical_cast.hpp>
+#include <regex>
 #include <boost/algorithm/string.hpp>
+#include <boost/format.hpp>
+#include <boost/lexical_cast.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/nowide/convert.hpp>
 
@@ -64,6 +67,7 @@
 #include "NotificationManager.hpp"
 #include "UnsavedChangesDialog.hpp"
 #include "SavePresetDialog.hpp"
+#include "PrintHostDialogs.hpp"
 
 #include "BitmapCache.hpp"
 
@@ -579,6 +583,14 @@ static void generic_exception_handle()
         wxMessageBox(errmsg + "\n\n" + wxString(ex.what()), _L("Fatal error"), wxOK | wxICON_ERROR);
         BOOST_LOG_TRIVIAL(error) << boost::format("std::bad_alloc exception: %1%") % ex.what();
         std::terminate();
+    } catch (const boost::io::bad_format_string& ex) {
+        wxString errmsg = _L("PrusaSlicer has encountered a localization error. "
+                             "Please report to PrusaSlicer team, what language was active and in which scenario "
+                             "this issue happened. Thank you.\n\nThe application will now terminate.");
+        wxMessageBox(errmsg + "\n\n" + wxString(ex.what()), _L("Critical error"), wxOK | wxICON_ERROR);
+        BOOST_LOG_TRIVIAL(error) << boost::format("Uncaught exception: %1%") % ex.what();
+        std::terminate();
+        throw;
     } catch (const std::exception& ex) {
         wxLogError("Internal error: %s", ex.what());
         BOOST_LOG_TRIVIAL(error) << boost::format("Uncaught exception: %1%") % ex.what();
@@ -663,8 +675,8 @@ bool GUI_App::init_opengl()
 void GUI_App::init_app_config()
 {
 	// Profiles for the alpha are stored into the PrusaSlicer-alpha directory to not mix with the current release.
-//	SetAppName(SLIC3R_APP_KEY);
-	SetAppName(SLIC3R_APP_KEY "-beta");
+    SetAppName(SLIC3R_APP_KEY);
+//	SetAppName(SLIC3R_APP_KEY "-beta");
 //	SetAppDisplayName(SLIC3R_APP_NAME);
 
 	// Set the Slic3r data directory at the Slic3r XS module.
@@ -933,13 +945,7 @@ bool GUI_App::on_init_inner()
         load_current_presets();
     mainframe->Show(true);
 
-    /* Temporary workaround for the correct behavior of the Scrolled sidebar panel:
-     * change min hight of object list to the normal min value (15 * wxGetApp().em_unit()) 
-     * after first whole Mainframe updating/layouting
-     */
-    const int list_min_height = 15 * em_unit();
-    if (obj_list()->GetMinSize().GetY() > list_min_height)
-        obj_list()->SetMinSize(wxSize(-1, list_min_height));
+    obj_list()->set_min_height();
 
     update_mode(); // update view mode after fix of the object_list size
 
@@ -1150,13 +1156,8 @@ void GUI_App::recreate_GUI(const wxString& msg_name)
     mainframe->Show(true);
 
     dlg.Update(90, _L("Loading of a mode view") + dots);
-    /* Temporary workaround for the correct behavior of the Scrolled sidebar panel:
-    * change min hight of object list to the normal min value (15 * wxGetApp().em_unit())
-    * after first whole Mainframe updating/layouting
-    */
-    const int list_min_height = 15 * em_unit();
-    if (obj_list()->GetMinSize().GetY() > list_min_height)
-        obj_list()->SetMinSize(wxSize(-1, list_min_height));
+
+    obj_list()->set_min_height();
     update_mode();
 
     // #ys_FIXME_delete_after_testing  Do we still need this  ?
@@ -1272,22 +1273,85 @@ bool GUI_App::switch_language()
     }
 }
 
+#ifdef __linux__
+static const wxLanguageInfo* linux_get_existing_locale_language(const wxLanguageInfo* language,
+                                                                const wxLanguageInfo* system_language)
+{
+    constexpr size_t max_len = 50;
+    char path[max_len] = "";
+    std::vector<std::string> locales;
+    const std::string lang_prefix = into_u8(language->CanonicalName.BeforeFirst('_'));
+
+    // Call locale -a so we can parse the output to get the list of available locales
+    // We expect lines such as "en_US.utf8". Pick ones starting with the language code
+    // we are switching to. Lines with different formatting will be removed later.
+    FILE* fp = popen("locale -a", "r");
+    if (fp != NULL) {
+        while (fgets(path, max_len, fp) != NULL) {
+            std::string line(path);
+            line = line.substr(0, line.find('\n'));
+            if (boost::starts_with(line, lang_prefix))
+                locales.push_back(line);
+        }
+        pclose(fp);
+    }
+
+    // locales now contain all candidates for this language.
+    // Sort them so ones containing anything about UTF-8 are at the end.
+    std::sort(locales.begin(), locales.end(), [](const std::string& a, const std::string& b)
+    {
+        auto has_utf8 = [](const std::string & s) {
+            auto S = boost::to_upper_copy(s);
+            return S.find("UTF8") != std::string::npos || S.find("UTF-8") != std::string::npos;
+        };
+        return ! has_utf8(a) && has_utf8(b);
+    });
+
+    // Remove the suffix behind a dot, if there is one.
+    for (std::string& s : locales)
+        s = s.substr(0, s.find("."));
+
+    // We just hope that dear Linux "locale -a" returns country codes
+    // in ISO 3166-1 alpha-2 code (two letter) format.
+    // https://en.wikipedia.org/wiki/List_of_ISO_3166_country_codes
+    // To be sure, remove anything not looking as expected
+    // (any number of lowercase letters, underscore, two uppercase letters).
+    locales.erase(std::remove_if(locales.begin(),
+                                 locales.end(),
+                                 [](const std::string& s) {
+                                     return ! std::regex_match(s,
+                                         std::regex("^[a-z]+_[A-Z]{2}$"));
+                                 }),
+                   locales.end());
+
+    // Is there a candidate matching a country code of a system language? Move it to the end,
+    // while maintaining the order of matches, so that the best match ends up at the very end.
+    std::string system_country = "_" + into_u8(system_language->CanonicalName.AfterFirst('_')).substr(0, 2);
+    int cnt = locales.size();
+    for (int i=0; i<cnt; ++i)
+        if (locales[i].find(system_country) != std::string::npos) {
+            locales.emplace_back(std::move(locales[i]));
+            locales[i].clear();
+        }
+
+    // Now try them one by one.
+    for (auto it = locales.rbegin(); it != locales.rend(); ++ it)
+        if (! it->empty()) {
+            const std::string &locale = *it;
+            const wxLanguageInfo* lang = wxLocale::FindLanguageInfo(from_u8(locale));
+            if (wxLocale::IsAvailable(lang->Language))
+                return lang;
+        }
+    return language;
+}
+#endif
+
 // select language from the list of installed languages
 bool GUI_App::select_language()
 {
 	wxArrayString translations = wxTranslations::Get()->GetAvailableTranslations(SLIC3R_APP_KEY);
     std::vector<const wxLanguageInfo*> language_infos;
     language_infos.emplace_back(wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH));
-#ifdef __linux__
-    // wxWidgets consider the default English locale to be en_GB, which is often missing on Linux.
-    // Thus we offer en_US on Linux as well.
-    language_infos.emplace_back(wxLocale::GetLanguageInfo(wxLANGUAGE_ENGLISH_US));
-    //FIXME https://github.com/prusa3d/PrusaSlicer/issues/2580#issuecomment-524546743
-    // In a correctly set up system, "locale -a" will get all the installed locales on that system.
-    // According to the installed locales, the locales for the dictionaries may be modified with the available
-    // CanonicalName of the locale, possibly duplicating the entries for each CanonicalName of the dictionary.
-    // Other languages with missing locales of the system can be greyed out or not shown at all.
-#endif // __linux__
     for (size_t i = 0; i < translations.GetCount(); ++ i) {
 	    const wxLanguageInfo *langinfo = wxLocale::FindLanguageInfo(translations[i]);
         if (langinfo != nullptr)
@@ -1316,13 +1380,6 @@ bool GUI_App::select_language()
         if (language_infos[i]->CanonicalName.BeforeFirst('_') == "en")
         	// This will be the default selection if the active language does not match any dictionary.
         	init_selection_default = i;
-#ifdef __linux__
-        // wxWidgets consider the default English locale to be en_GB, which is often missing on Linux.
-        // Thus we make the distintion between "en_US" and "en_GB" clear.
-        if (language_infos[i]->CanonicalName == "en_GB" && language_infos[i]->Description == "English")
-            names.Add("English (U.K.)");
-        else
-#endif // __linux__
         names.Add(language_infos[i]->Description);
     }
     if (init_selection == -1)
@@ -1389,6 +1446,14 @@ bool GUI_App::load_language(wxString language, bool initial)
 				m_language_info_best = wxLocale::FindLanguageInfo(best_language);
 	        	BOOST_LOG_TRIVIAL(trace) << boost::format("Best translation language detected (may be different from user locales): %1%") % m_language_info_best->CanonicalName.ToUTF8().data();
 			}
+            #ifdef __linux__
+            wxString lc_all;
+            if (wxGetEnv("LC_ALL", &lc_all) && ! lc_all.IsEmpty()) {
+                // Best language returned by wxWidgets on Linux apparently does not respect LC_ALL.
+                // Disregard the "best" suggestion in case LC_ALL is provided.
+                m_language_info_best = nullptr;
+            }
+            #endif
 		}
     }
 
@@ -1433,6 +1498,17 @@ bool GUI_App::load_language(wxString language, bool initial)
         language_info = m_language_info_best;
     } else if (m_language_info_system != nullptr && language_info->CanonicalName.BeforeFirst('_') == m_language_info_system->CanonicalName.BeforeFirst('_'))
         language_info = m_language_info_system;
+
+#ifdef __linux__
+    // If we can't find this locale , try to use different one for the language
+    // instead of just reporting that it is impossible to switch.
+    if (! wxLocale::IsAvailable(language_info->Language)) {
+        std::string original_lang = into_u8(language_info->CanonicalName);
+        language_info = linux_get_existing_locale_language(language_info, m_language_info_system);
+        BOOST_LOG_TRIVIAL(trace) << boost::format("Can't switch language to %1% (missing locales). Using %2% instead.")
+                                    % original_lang % language_info->CanonicalName.ToUTF8().data();
+    }
+#endif
 
     if (! wxLocale::IsAvailable(language_info->Language)) {
     	// Loading the language dictionary failed.
@@ -1582,13 +1658,16 @@ void GUI_App::add_config_menu(wxMenuBar *menu)
                 ConfigSnapshotDialog dlg(Slic3r::GUI::Config::SnapshotDB::singleton(), on_snapshot);
                 dlg.ShowModal();
                 if (!dlg.snapshot_to_activate().empty()) {
-                    if (!Config::SnapshotDB::singleton().is_on_snapshot(*app_config))
+                    if (! Config::SnapshotDB::singleton().is_on_snapshot(*app_config))
                         Config::SnapshotDB::singleton().take_snapshot(*app_config, Config::Snapshot::SNAPSHOT_BEFORE_ROLLBACK);
-                    app_config->set("on_snapshot",
-                        Config::SnapshotDB::singleton().restore_snapshot(dlg.snapshot_to_activate(), *app_config).id);
-                    preset_bundle->load_presets(*app_config);
-                    // Load the currently selected preset into the GUI, update the preset selection box.
-                    load_current_presets();
+                    try {
+                        app_config->set("on_snapshot", Config::SnapshotDB::singleton().restore_snapshot(dlg.snapshot_to_activate(), *app_config).id);
+                        preset_bundle->load_presets(*app_config);
+                        // Load the currently selected preset into the GUI, update the preset selection box.
+                        load_current_presets();
+                    } catch (std::exception &ex) {
+                        GUI::show_error(nullptr, _L("Failed to activate configuration snapshot.") + "\n" + into_u8(ex.what()));
+                    }
                 }
             }
             break;
@@ -1704,6 +1783,33 @@ bool GUI_App::check_unsaved_changes(const wxString &header)
     }
 
     return true;
+}
+
+bool GUI_App::check_print_host_queue()
+{
+    wxString dirty;
+    std::vector<std::pair<std::string, std::string>> jobs;
+    // Get ongoing jobs from dialog
+    mainframe->m_printhost_queue_dlg->get_active_jobs(jobs);
+    if (jobs.empty())
+        return true;
+    // Show dialog
+    wxString job_string = wxString();
+    for (const auto& job : jobs) {
+        job_string += format_wxstr("   %1% : %2% \n", job.first, job.second);
+    }
+    wxString message;
+    message += _(L("The uploads are still ongoing")) + ":\n\n" + job_string +"\n" + _(L("Stop them and continue anyway?"));
+    wxMessageDialog dialog(mainframe,
+        message,
+        wxString(SLIC3R_APP_NAME) + " - " + _(L("Ongoing uploads")),
+        wxICON_QUESTION | wxYES_NO | wxNO_DEFAULT);
+    if (dialog.ShowModal() == wxID_YES)
+        return true;
+
+    // TODO: If already shown, bring forward
+    mainframe->m_printhost_queue_dlg->Show();
+    return false;
 }
 
 bool GUI_App::checked_tab(Tab* tab)

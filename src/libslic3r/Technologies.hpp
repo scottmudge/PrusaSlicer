@@ -70,7 +70,6 @@
 #define ENABLE_2_3_0_ALPHA4 1
 
 #define ENABLE_FIXED_SCREEN_SIZE_POINT_MARKERS (1 && ENABLE_2_3_0_ALPHA4)
-#define ENABLE_SHOW_OPTION_POINT_LAYERS (1 && ENABLE_2_3_0_ALPHA4)
 
 
 //===================
@@ -78,7 +77,6 @@
 //===================
 #define ENABLE_2_3_0_BETA1 1
 
-#define ENABLE_SHOW_WIPE_MOVES (1 && ENABLE_2_3_0_BETA1)
 #define ENABLE_DRAG_AND_DROP_FIX (1 && ENABLE_2_3_0_BETA1)
 #define ENABLE_CUSTOMIZABLE_FILES_ASSOCIATION_ON_WIN (1 && ENABLE_2_3_0_BETA1)
 
@@ -92,5 +90,21 @@
 #define ENABLE_NEW_NOTIFICATIONS_FADE_OUT (1 && ENABLE_2_3_0_BETA2) 
 #define ENABLE_PREVIEW_TYPE_CHANGE (1 && ENABLE_2_3_0_BETA2)
 
+
+//===================
+// 2.3.0.beta3 techs
+//===================
+#define ENABLE_2_3_0_BETA3 1
+
+#define ENABLE_TOOLPATHS_WIDTH_HEIGHT_FROM_GCODE (1 && ENABLE_2_3_0_BETA3)
+#define ENABLE_RENDER_PATH_REFRESH_AFTER_OPTIONS_CHANGE (1 && ENABLE_2_3_0_BETA3)
+
+
+//=================
+// 2.3.0.rc1 techs
+//=================
+#define ENABLE_2_3_0_RC1 1
+
+#define ENABLE_VOLUMETRIC_EXTRUSION_PROCESSING (1 && ENABLE_2_3_0_RC1)
 
 #endif // _prusaslicer_technologies_h_

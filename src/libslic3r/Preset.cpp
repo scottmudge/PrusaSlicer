@@ -410,7 +410,7 @@ const std::vector<std::string>& Preset::print_options()
         "infill_every_layers", "infill_only_where_needed", "solid_infill_every_layers", "fill_angle", "bridge_angle",
         "solid_infill_below_area", "only_retract_when_crossing_perimeters", "infill_first", 
     	"ironing", "ironing_type", "ironing_flowrate", "ironing_speed", "ironing_spacing",
-        "max_print_speed", "max_volumetric_speed",
+        "max_print_speed", "max_volumetric_speed", "avoid_crossing_perimeters_max_detour",
 #ifdef HAS_PRESSURE_EQUALIZER
         "max_volumetric_extrusion_rate_slope_positive", "max_volumetric_extrusion_rate_slope_negative",
 #endif /* HAS_PRESSURE_EQUALIZER */
@@ -991,7 +991,15 @@ const Preset* PresetCollection::get_preset_parent(const Preset& child) const
 		if (it != m_presets.end()) 
 			preset = &(*it);
     }
-    return (preset == nullptr/* || preset->is_default */|| preset->is_external) ? nullptr : preset;
+    return 
+         // not found
+        (preset == nullptr/* || preset->is_default */|| 
+         // this should not happen, user profile should not derive from an external profile
+         preset->is_external ||
+         // this should not happen, however people are creative, see GH #4996
+         preset == &child) ? 
+            nullptr : 
+            preset;
 }
 
 // Return vendor of the first parent profile, for which the vendor is defined, or null if such profile does not exist.
@@ -1308,6 +1316,8 @@ std::string PresetCollection::section_name() const
     }
 }
 
+// Used for validating the "inherits" flag when importing user's config bundles.
+// Returns names of all system presets including the former names of these presets.
 std::vector<std::string> PresetCollection::system_preset_names() const
 {
     size_t num = 0;
@@ -1317,8 +1327,10 @@ std::vector<std::string> PresetCollection::system_preset_names() const
     std::vector<std::string> out;
     out.reserve(num);
     for (const Preset &preset : m_presets)
-        if (preset.is_system)
+        if (preset.is_system) {
             out.emplace_back(preset.name);
+            out.insert(out.end(), preset.renamed_from.begin(), preset.renamed_from.end());
+        }
     std::sort(out.begin(), out.end());
     return out;
 }
@@ -1473,6 +1485,12 @@ bool PhysicalPrinter::add_preset(const std::string& preset_name)
 bool PhysicalPrinter::delete_preset(const std::string& preset_name)
 {
     return preset_names.erase(preset_name) > 0;
+}
+
+PhysicalPrinter::PhysicalPrinter(const std::string& name, const DynamicPrintConfig& default_config) : 
+    name(name), config(default_config)
+{
+    update_from_config(config);
 }
 
 PhysicalPrinter::PhysicalPrinter(const std::string& name, const DynamicPrintConfig &default_config, const Preset& preset) :
@@ -1829,6 +1847,13 @@ void PhysicalPrinterCollection::select_printer(const std::string& full_name)
         m_selected_preset = *it->preset_names.begin();
     else
         m_selected_preset = it->get_preset_name(full_name);
+}
+
+void PhysicalPrinterCollection::select_printer(const std::string& printer_name, const std::string& preset_name)
+{
+    if (preset_name.empty())
+        return select_printer(printer_name);
+    return select_printer(printer_name + PhysicalPrinter::separator() + preset_name);
 }
 
 void PhysicalPrinterCollection::select_printer(const PhysicalPrinter& printer)

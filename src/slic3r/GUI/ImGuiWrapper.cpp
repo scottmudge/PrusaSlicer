@@ -1001,6 +1001,8 @@ void ImGuiWrapper::init_font(bool compress)
     // Fill rectangles from the SVG-icons
     for (const auto& icon : font_icons) {
         if (const ImFontAtlas::CustomRect* rect = io.Fonts->GetCustomRectByIndex(rect_id)) {
+            assert(rect->Width == icon_sz);
+            assert(rect->Height == icon_sz);
             std::vector<unsigned char> raw_data = load_svg(icon.second, icon_sz, icon_sz);
             const ImU32* pIn = (ImU32*)raw_data.data();
             for (int y = 0; y < icon_sz; y++) {
@@ -1011,10 +1013,12 @@ void ImGuiWrapper::init_font(bool compress)
         }
         rect_id++;
     }
-    icon_sz = lround(32 * font_scale); // default size of large icon is 32 px
-    
-    for (const auto& icon : font_icons_large) {
+
+    icon_sz *= 2; // default size of large icon is 32 px
+    for (auto icon : font_icons_large) {
         if (const ImFontAtlas::CustomRect* rect = io.Fonts->GetCustomRectByIndex(rect_id)) {
+            assert(rect->Width == icon_sz);
+            assert(rect->Height == icon_sz);
             std::vector<unsigned char> raw_data = load_svg(icon.second, icon_sz, icon_sz);
             const ImU32* pIn = (ImU32*)raw_data.data();
             for (int y = 0; y < icon_sz; y++) {

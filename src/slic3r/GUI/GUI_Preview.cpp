@@ -248,9 +248,7 @@ bool Preview::init(wxWindow* parent, Model* model)
     m_combochecklist_options->Create(m_bottom_toolbar_panel, wxID_ANY, _L("Options"), wxDefaultPosition, wxDefaultSize, wxCB_READONLY);
     std::string options_items = GUI::into_u8(
         get_option_type_string(OptionType::Travel) + "|0|" +
-#if ENABLE_SHOW_WIPE_MOVES
         get_option_type_string(OptionType::Wipe) + "|0|" +
-#endif // ENABLE_SHOW_WIPE_MOVES
         get_option_type_string(OptionType::Retractions) + "|0|" +
         get_option_type_string(OptionType::Unretractions) + "|0|" +
         get_option_type_string(OptionType::ToolChanges) + "|0|" +
@@ -509,6 +507,9 @@ void Preview::on_combochecklist_options(wxCommandEvent& evt)
 
     m_canvas->set_gcode_options_visibility_from_flags(new_flags);
 
+#if ENABLE_RENDER_PATH_REFRESH_AFTER_OPTIONS_CHANGE
+    m_canvas->refresh_gcode_preview_render_paths();
+#else
     bool skip_refresh = xored(curr_flags, new_flags, static_cast<unsigned int>(OptionType::Shells)) ||
         xored(curr_flags, new_flags, static_cast<unsigned int>(OptionType::ToolMarker));
 
@@ -516,6 +517,7 @@ void Preview::on_combochecklist_options(wxCommandEvent& evt)
         refresh_print();
     else
         m_canvas->set_as_dirty();
+#endif // ENABLE_RENDER_PATH_REFRESH_AFTER_OPTIONS_CHANGE
 }
 
 #if !ENABLE_PREVIEW_TYPE_CHANGE
@@ -1019,9 +1021,7 @@ wxString Preview::get_option_type_string(OptionType type) const
     switch (type)
     {
     case OptionType::Travel:        { return _L("Travel"); }
-#if ENABLE_SHOW_WIPE_MOVES
     case OptionType::Wipe:          { return _L("Wipe"); }
-#endif // ENABLE_SHOW_WIPE_MOVES
     case OptionType::Retractions:   { return _L("Retractions"); }
     case OptionType::Unretractions: { return _L("Deretractions"); }
     case OptionType::ToolChanges:   { return _L("Tool changes"); }
