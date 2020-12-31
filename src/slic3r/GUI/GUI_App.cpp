@@ -669,7 +669,13 @@ wxGLContext* GUI_App::init_glcontext(wxGLCanvas& canvas)
 
 bool GUI_App::init_opengl()
 {
+#ifdef __linux__
+    bool status = m_opengl_mgr.init_gl();
+    m_opengl_initialized = true;
+    return status;
+#else
     return m_opengl_mgr.init_gl();
+#endif
 }
 
 void GUI_App::init_app_config()
@@ -886,55 +892,6 @@ bool GUI_App::on_init_inner()
 
     m_printhost_job_queue.reset(new PrintHostJobQueue(mainframe->printhost_queue_dlg()));
 
-
-    Bind(wxEVT_IDLE, [this](wxIdleEvent& event)
-    {
-        if (! plater_)
-            return;
-
-
-        if (app_config->dirty() && app_config->get("autosave") == "1")
-            app_config->save();
-
-        this->obj_manipul()->update_if_dirty();
-
-        static bool update_gui_after_init = true;
-        if (update_gui_after_init) {
-            update_gui_after_init = false;
-#ifdef WIN32
-            this->mainframe->register_win32_callbacks();
-#endif
-            this->post_init();
-        }
-
-		// Preset updating & Configwizard are done after the above initializations,
-	    // and after MainFrame is created & shown.
-	    // The extra CallAfter() is needed because of Mac, where this is the only way
-	    // to popup a modal dialog on start without screwing combo boxes.
-	    // This is ugly but I honestly found no better way to do it.
-	    // Neither wxShowEvent nor wxWindowCreateEvent work reliably. 
-
-        static bool once = true;
-        if (once) {
-            once = false;
-
-            if (preset_updater != nullptr) {
-                check_updates(false);
-
-                CallAfter([this] {
-                    config_wizard_startup();
-                    preset_updater->slic3r_update_notify();
-                    preset_updater->sync(preset_bundle);
-                    });
-            }
-
-#ifdef _WIN32
-			//sets window property to mainframe so other instances can indentify it
-			OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
-#endif //WIN32
-        }
-    });
-
     if (is_gcode_viewer()) {
         mainframe->update_layout();
         if (plater_ != nullptr)
@@ -952,6 +909,61 @@ bool GUI_App::on_init_inner()
 #ifdef __APPLE__
     other_instance_message_handler()->bring_instance_forward();
 #endif //__APPLE__
+
+    Bind(wxEVT_IDLE, [this](wxIdleEvent& event)
+    {
+        if (! plater_)
+            return;
+
+
+        if (app_config->dirty() && app_config->get("autosave") == "1")
+            app_config->save();
+
+        this->obj_manipul()->update_if_dirty();
+
+        static bool update_gui_after_init = true;
+
+        // An ugly solution to GH #5537 in which GUI_App::init_opengl (normally called from events wxEVT_PAINT
+        // and wxEVT_SET_FOCUS before GUI_App::post_init is called) wasn't called before GUI_App::post_init and OpenGL wasn't initialized.
+#ifdef __linux__
+        if (update_gui_after_init && m_opengl_initialized) {
+#else
+        if (update_gui_after_init) {
+#endif
+            update_gui_after_init = false;
+#ifdef WIN32
+            this->mainframe->register_win32_callbacks();
+#endif
+            this->post_init();
+        }
+
+        // Preset updating & Configwizard are done after the above initializations,
+        // and after MainFrame is created & shown.
+        // The extra CallAfter() is needed because of Mac, where this is the only way
+        // to popup a modal dialog on start without screwing combo boxes.
+        // This is ugly but I honestly found no better way to do it.
+        // Neither wxShowEvent nor wxWindowCreateEvent work reliably.
+
+        static bool once = true;
+        if (once) {
+            once = false;
+
+            if (preset_updater != nullptr) {
+                check_updates(false);
+
+                CallAfter([this] {
+                    config_wizard_startup();
+                    preset_updater->slic3r_update_notify();
+                    preset_updater->sync(preset_bundle);
+                    });
+            }
+
+#ifdef _WIN32
+            //sets window property to mainframe so other instances can indentify it
+            OtherInstanceMessageHandler::init_windows_properties(mainframe, m_instance_hash_int);
+#endif //WIN32
+        }
+    });
 
     m_initialized = true;
     return true;
