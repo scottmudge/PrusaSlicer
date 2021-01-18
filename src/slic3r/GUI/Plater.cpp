@@ -595,17 +595,10 @@ struct Sidebar::priv
 
 Sidebar::priv::~priv()
 {
-    if (object_manipulation != nullptr)
-        delete object_manipulation;
-
-    if (object_settings != nullptr)
-        delete object_settings;
-
-    if (frequently_changed_parameters != nullptr)
-        delete frequently_changed_parameters;
-
-    if (object_layers != nullptr)
-        delete object_layers;
+    delete object_manipulation;
+    delete object_settings;
+    delete frequently_changed_parameters;
+    delete object_layers;
 }
 
 void Sidebar::priv::show_preset_comboboxes()
@@ -633,7 +626,11 @@ Sidebar::Sidebar(Plater *parent)
     : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(42 * wxGetApp().em_unit(), -1)), p(new priv(parent))
 {
     p->scrolled = new wxScrolledWindow(this);
-    p->scrolled->SetScrollbars(0, 100, 1, 2);
+//    p->scrolled->SetScrollbars(0, 100, 1, 2); // ys_DELETE_after_testing. pixelsPerUnitY = 100 from https://github.com/prusa3d/PrusaSlicer/commit/8f019e5fa992eac2c9a1e84311c990a943f80b01, 
+    // but this cause the bad layout of the sidebar, when all infoboxes appear.
+    // As a result we can see the empty block at the bottom of the sidebar
+    // But if we set this value to 5, layout will be better
+    p->scrolled->SetScrollRate(0, 5);
 
     SetFont(wxGetApp().normal_font());
 #ifndef __APPLE__
@@ -2380,6 +2377,10 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                             CustomGCode::update_custom_gcode_per_print_z_from_config(model.custom_gcode_per_print_z, &wxGetApp().preset_bundle->project_config);
                         // For exporting from the amf/3mf we shouldn't check printer_presets for the containing information about "Print Host upload"
                         wxGetApp().load_current_presets(false);
+                        // Update filament colors for the MM-printer profile in the full config 
+                        // to avoid black (default) colors for Extruders in the ObjectList, 
+                        // when for extruder colors are used filament colors
+                        q->update_filament_colors_in_full_config();
                         is_project_file = true;
                     }
                     wxGetApp().app_config->update_config_dir(path.parent_path().string());
@@ -5788,6 +5789,26 @@ void Plater::on_extruders_change(size_t num_extruders)
     sidebar().scrolled_panel()->Refresh();
 }
 
+bool Plater::update_filament_colors_in_full_config()
+{
+    // There is a case, when we use filament_color instead of extruder_color (when extruder_color == "").
+    // Thus plater config option "filament_colour" should be filled with filament_presets values.
+    // Otherwise, on 3dScene will be used last edited filament color for all volumes with extruder_color == "".
+    const std::vector<std::string> filament_presets = wxGetApp().preset_bundle->filament_presets;
+    if (filament_presets.size() == 1 || !p->config->has("filament_colour"))
+        return false;
+
+    const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
+    std::vector<std::string> filament_colors;
+    filament_colors.reserve(filament_presets.size());
+
+    for (const std::string& filament_preset : filament_presets)
+        filament_colors.push_back(filaments.find_preset(filament_preset, true)->config.opt_string("filament_colour", (unsigned)0));
+
+    p->config->option<ConfigOptionStrings>("filament_colour")->values = filament_colors;
+    return true;
+}
+
 void Plater::on_config_change(const DynamicPrintConfig &config)
 {
     bool update_scheduled = false;
@@ -5797,22 +5818,7 @@ void Plater::on_config_change(const DynamicPrintConfig &config)
         {
             update_scheduled = true; // update should be scheduled (for update 3DScene) #2738
 
-            /* There is a case, when we use filament_color instead of extruder_color (when extruder_color == "").
-             * Thus plater config option "filament_colour" should be filled with filament_presets values.
-             * Otherwise, on 3dScene will be used last edited filament color for all volumes with extruder_color == "".
-             */
-            const std::vector<std::string> filament_presets = wxGetApp().preset_bundle->filament_presets;
-            if (filament_presets.size() > 1 &&
-                p->config->option<ConfigOptionStrings>(opt_key)->values.size() != config.option<ConfigOptionStrings>(opt_key)->values.size())
-            {
-                const PresetCollection& filaments = wxGetApp().preset_bundle->filaments;
-                std::vector<std::string> filament_colors;
-                filament_colors.reserve(filament_presets.size());
-
-                for (const std::string& filament_preset : filament_presets)
-                    filament_colors.push_back(filaments.find_preset(filament_preset, true)->config.opt_string("filament_colour", (unsigned)0));
-
-                p->config->option<ConfigOptionStrings>(opt_key)->values = filament_colors;
+            if (update_filament_colors_in_full_config()) {
                 p->sidebar->obj_list()->update_extruder_colors();
                 continue;
             }
@@ -6105,8 +6111,10 @@ void Plater::changed_objects(const std::vector<size_t>& object_idxs)
         // pulls the correct data, update the 3D scene.
         this->p->update_restart_background_process(true, false);
     }
-    else
+    else {
         p->view3D->reload_scene(false);
+        p->view3D->get_canvas3d()->update_instance_printable_state_for_objects(object_idxs);
+    }
 
     // update print
     this->p->schedule_background_process();
