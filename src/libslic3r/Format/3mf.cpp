@@ -21,6 +21,7 @@
 #include <boost/filesystem/operations.hpp>
 #include <boost/nowide/fstream.hpp>
 #include <boost/nowide/cstdio.hpp>
+#include <boost/spirit/include/karma.hpp>
 
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
@@ -30,6 +31,12 @@ namespace pt = boost::property_tree;
 #include <expat.h>
 #include <Eigen/Dense>
 #include "miniz_extension.hpp"
+
+// Slightly faster than sprintf("%.9g"), but there is an issue with the karma floating point formatter,
+// https://github.com/boostorg/spirit/pull/586
+// where the exported string is one digit shorter than it should be to guarantee lossless round trip.
+// The code is left here for the ocasion boost guys improve.
+#define EXPORT_3MF_USE_SPIRIT_KARMA_FP 0
 
 // VERSION NUMBERS
 // 0 : .3mf, files saved by older slic3r or other applications. No version definition in them.
@@ -2029,8 +2036,8 @@ namespace Slic3r {
         bool _add_thumbnail_file_to_archive(mz_zip_archive& archive, const ThumbnailData& thumbnail_data);
         bool _add_relationships_file_to_archive(mz_zip_archive& archive);
         bool _add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, IdToObjectDataMap& objects_data);
-        bool _add_object_to_model_stream(std::stringstream& stream, unsigned int& object_id, ModelObject& object, BuildItemsList& build_items, VolumeToOffsetsMap& volumes_offsets);
-        bool _add_mesh_to_object_stream(std::stringstream& stream, ModelObject& object, VolumeToOffsetsMap& volumes_offsets);
+        bool _add_object_to_model_stream(mz_zip_writer_staged_context &context, unsigned int& object_id, ModelObject& object, BuildItemsList& build_items, VolumeToOffsetsMap& volumes_offsets);
+        bool _add_mesh_to_object_stream(mz_zip_writer_staged_context &context, ModelObject& object, VolumeToOffsetsMap& volumes_offsets);
         bool _add_build_to_model_stream(std::stringstream& stream, const BuildItemsList& build_items);
         bool _add_layer_height_profile_file_to_archive(mz_zip_archive& archive, Model& model);
         bool _add_layer_config_ranges_file_to_archive(mz_zip_archive& archive, Model& model);
@@ -2186,9 +2193,9 @@ namespace Slic3r {
         std::stringstream stream;
         stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
         stream << "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\n";
-        stream << " <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\" />\n";
-        stream << " <Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\" />\n";
-        stream << " <Default Extension=\"png\" ContentType=\"image/png\" />\n";
+        stream << " <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>\n";
+        stream << " <Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/>\n";
+        stream << " <Default Extension=\"png\" ContentType=\"image/png\"/>\n";
         stream << "</Types>";
 
         std::string out = stream.str();
@@ -2225,8 +2232,8 @@ namespace Slic3r {
         std::stringstream stream;
         stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
         stream << "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n";
-        stream << " <Relationship Target=\"/" << MODEL_FILE << "\" Id=\"rel-1\" Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\" />\n";
-        stream << " <Relationship Target=\"/" << THUMBNAIL_FILE << "\" Id=\"rel-2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail\" />\n";
+        stream << " <Relationship Target=\"/" << MODEL_FILE << "\" Id=\"rel-1\" Type=\"http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel\"/>\n";
+        stream << " <Relationship Target=\"/" << THUMBNAIL_FILE << "\" Id=\"rel-2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail\"/>\n";
         stream << "</Relationships>";
 
         std::string out = stream.str();
@@ -2240,31 +2247,55 @@ namespace Slic3r {
         return true;
     }
 
-    bool _3MF_Exporter::_add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, IdToObjectDataMap& objects_data)
+    static void reset_stream(std::stringstream &stream)
     {
-        std::stringstream stream;
+        stream.str("");
+        stream.clear();
         // https://en.cppreference.com/w/cpp/types/numeric_limits/max_digits10
         // Conversion of a floating-point value to text and back is exact as long as at least max_digits10 were used (9 for float, 17 for double).
         // It is guaranteed to produce the same floating-point value, even though the intermediate text representation is not exact.
         // The default value of std::stream precision is 6 digits only!
-		stream << std::setprecision(std::numeric_limits<float>::max_digits10);
-        stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-        stream << "<" << MODEL_TAG << " unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" xmlns:slic3rpe=\"http://schemas.slic3r.org/3mf/2017/06\">\n";
-        stream << " <" << METADATA_TAG << " name=\"" << SLIC3RPE_3MF_VERSION << "\">" << VERSION_3MF << "</" << METADATA_TAG << ">\n";
-        std::string name = xml_escape(boost::filesystem::path(filename).stem().string());
-        stream << " <" << METADATA_TAG << " name=\"Title\">" << name << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"Designer\">" << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"Description\">" << name << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"Copyright\">" << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"LicenseTerms\">" << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"Rating\">" << "</" << METADATA_TAG << ">\n";
-        std::string date = Slic3r::Utils::utc_timestamp(Slic3r::Utils::get_current_time_utc());
-        // keep only the date part of the string
-        date = date.substr(0, 10);
-        stream << " <" << METADATA_TAG << " name=\"CreationDate\">" << date << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"ModificationDate\">" << date << "</" << METADATA_TAG << ">\n";
-        stream << " <" << METADATA_TAG << " name=\"Application\">" << SLIC3R_APP_KEY << "-" << SLIC3R_VERSION << "</" << METADATA_TAG << ">\n";
-        stream << " <" << RESOURCES_TAG << ">\n";
+        stream << std::setprecision(std::numeric_limits<float>::max_digits10);
+    }
+
+    bool _3MF_Exporter::_add_model_file_to_archive(const std::string& filename, mz_zip_archive& archive, const Model& model, IdToObjectDataMap& objects_data)
+    {
+        mz_zip_writer_staged_context context;
+        if (!mz_zip_writer_add_staged_open(&archive, &context, MODEL_FILE.c_str(), 
+            // Maximum expected and allowed 3MF file size is 16GiB.
+            // This switches the ZIP file to a 64bit mode, which adds a tiny bit of overhead to file records.
+            (uint64_t(1) << 30) * 16,
+            nullptr, nullptr, 0, MZ_DEFAULT_COMPRESSION, nullptr, 0, nullptr, 0)) {
+            add_error("Unable to add model file to archive");
+            return false;
+        }
+
+        {
+            std::stringstream stream;
+            reset_stream(stream);
+            stream << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+            stream << "<" << MODEL_TAG << " unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" xmlns:slic3rpe=\"http://schemas.slic3r.org/3mf/2017/06\">\n";
+            stream << " <" << METADATA_TAG << " name=\"" << SLIC3RPE_3MF_VERSION << "\">" << VERSION_3MF << "</" << METADATA_TAG << ">\n";
+            std::string name = xml_escape(boost::filesystem::path(filename).stem().string());
+            stream << " <" << METADATA_TAG << " name=\"Title\">" << name << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"Designer\">" << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"Description\">" << name << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"Copyright\">" << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"LicenseTerms\">" << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"Rating\">" << "</" << METADATA_TAG << ">\n";
+            std::string date = Slic3r::Utils::utc_timestamp(Slic3r::Utils::get_current_time_utc());
+            // keep only the date part of the string
+            date = date.substr(0, 10);
+            stream << " <" << METADATA_TAG << " name=\"CreationDate\">" << date << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"ModificationDate\">" << date << "</" << METADATA_TAG << ">\n";
+            stream << " <" << METADATA_TAG << " name=\"Application\">" << SLIC3R_APP_KEY << "-" << SLIC3R_VERSION << "</" << METADATA_TAG << ">\n";
+            stream << " <" << RESOURCES_TAG << ">\n";
+            std::string buf = stream.str();
+            if (! buf.empty() && ! mz_zip_writer_add_staged_data(&context, buf.data(), buf.size())) {
+                add_error("Unable to add model file to archive");
+                return false;
+            }
+        }
 
         // Instance transformations, indexed by the 3MF object ID (which is a linear serialization of all instances of all ModelObjects).
         BuildItemsList build_items;
@@ -2284,37 +2315,46 @@ namespace Slic3r {
             // Store geometry of all ModelVolumes contained in a single ModelObject into a single 3MF indexed triangle set object.
             // object_it->second.volumes_offsets will contain the offsets of the ModelVolumes in that single indexed triangle set.
             // object_id will be increased to point to the 1st instance of the next ModelObject.
-            if (!_add_object_to_model_stream(stream, object_id, *obj, build_items, object_it->second.volumes_offsets))
+            if (!_add_object_to_model_stream(context, object_id, *obj, build_items, object_it->second.volumes_offsets))
             {
                 add_error("Unable to add object to archive");
+                mz_zip_writer_add_staged_finish(&context);
                 return false;
             }
         }
 
-        stream << " </" << RESOURCES_TAG << ">\n";
-
-        // Store the transformations of all the ModelInstances of all ModelObjects, indexed in a linear fashion.
-        if (!_add_build_to_model_stream(stream, build_items))
         {
-            add_error("Unable to add build to archive");
-            return false;
-        }
+            std::stringstream stream;
+            reset_stream(stream);
+            stream << " </" << RESOURCES_TAG << ">\n";
 
-        stream << "</" << MODEL_TAG << ">\n";
+            // Store the transformations of all the ModelInstances of all ModelObjects, indexed in a linear fashion.
+            if (!_add_build_to_model_stream(stream, build_items))
+            {
+                add_error("Unable to add build to archive");
+                mz_zip_writer_add_staged_finish(&context);
+                return false;
+            }
 
-        std::string out = stream.str();
+            stream << "</" << MODEL_TAG << ">\n";
+           
+            std::string buf = stream.str();
 
-        if (!mz_zip_writer_add_mem(&archive, MODEL_FILE.c_str(), (const void*)out.data(), out.length(), MZ_DEFAULT_COMPRESSION))
-        {
-            add_error("Unable to add model file to archive");
-            return false;
+            if ((! buf.empty() && ! mz_zip_writer_add_staged_data(&context, buf.data(), buf.size())) ||
+                ! mz_zip_writer_add_staged_finish(&context))
+            {
+                add_error("Unable to add model file to archive");
+                return false;
+            }
         }
 
         return true;
     }
 
-    bool _3MF_Exporter::_add_object_to_model_stream(std::stringstream& stream, unsigned int& object_id, ModelObject& object, BuildItemsList& build_items, VolumeToOffsetsMap& volumes_offsets)
+    bool _3MF_Exporter::_add_object_to_model_stream(mz_zip_writer_staged_context &context, unsigned int& object_id, ModelObject& object, BuildItemsList& build_items, VolumeToOffsetsMap& volumes_offsets)
     {
+        std::stringstream stream;
+        reset_stream(stream);
         unsigned int id = 0;
         for (const ModelInstance* instance : object.instances)
         {
@@ -2327,7 +2367,10 @@ namespace Slic3r {
 
             if (id == 0)
             {
-                if (!_add_mesh_to_object_stream(stream, object, volumes_offsets))
+                std::string buf = stream.str();
+                reset_stream(stream);
+                if ((! buf.empty() && ! mz_zip_writer_add_staged_data(&context, buf.data(), buf.size())) ||
+                    ! _add_mesh_to_object_stream(context, object, volumes_offsets))
                 {
                     add_error("Unable to add mesh to archive");
                     return false;
@@ -2336,7 +2379,7 @@ namespace Slic3r {
             else
             {
                 stream << "   <" << COMPONENTS_TAG << ">\n";
-                stream << "    <" << COMPONENT_TAG << " objectid=\"" << object_id << "\" />\n";
+                stream << "    <" << COMPONENT_TAG << " objectid=\"" << object_id << "\"/>\n";
                 stream << "   </" << COMPONENTS_TAG << ">\n";
             }
 
@@ -2351,14 +2394,80 @@ namespace Slic3r {
         }
 
         object_id += id;
-        return true;
+        std::string buf = stream.str();
+        return buf.empty() || mz_zip_writer_add_staged_data(&context, buf.data(), buf.size());
     }
 
-    bool _3MF_Exporter::_add_mesh_to_object_stream(std::stringstream& stream, ModelObject& object, VolumeToOffsetsMap& volumes_offsets)
+#if EXPORT_3MF_USE_SPIRIT_KARMA_FP
+    template <typename Num>
+    struct coordinate_policy_fixed : boost::spirit::karma::real_policies<Num>
     {
-        stream << "   <" << MESH_TAG << ">\n";
-        stream << "    <" << VERTICES_TAG << ">\n";
+        static int floatfield(Num n) { return fmtflags::fixed; }
+        // Number of decimal digits to maintain float accuracy when storing into a text file and parsing back.
+        static unsigned precision(Num /* n */) { return std::numeric_limits<Num>::max_digits10 + 1; }
+        // No trailing zeros, thus for fmtflags::fixed usually much less than max_digits10 decimal numbers will be produced.
+        static bool trailing_zeros(Num /* n */) { return false; }
+    };
+    template <typename Num>
+    struct coordinate_policy_scientific : coordinate_policy_fixed<Num>
+    {
+        static int floatfield(Num n) { return fmtflags::scientific; }
+    };
+    // Define a new generator type based on the new coordinate policy.
+    using coordinate_type_fixed      = boost::spirit::karma::real_generator<float, coordinate_policy_fixed<float>>;
+    using coordinate_type_scientific = boost::spirit::karma::real_generator<float, coordinate_policy_scientific<float>>;
+#endif // EXPORT_3MF_USE_SPIRIT_KARMA_FP
 
+    bool _3MF_Exporter::_add_mesh_to_object_stream(mz_zip_writer_staged_context &context, ModelObject& object, VolumeToOffsetsMap& volumes_offsets)
+    {
+        std::string output_buffer;
+        output_buffer += "   <";
+        output_buffer += MESH_TAG;
+        output_buffer += ">\n    <";
+        output_buffer += VERTICES_TAG;
+        output_buffer += ">\n";
+
+        auto flush = [this, &output_buffer, &context](bool force = false) {
+            if ((force && ! output_buffer.empty()) || output_buffer.size() >= 65536 * 16) {
+                if (! mz_zip_writer_add_staged_data(&context, output_buffer.data(), output_buffer.size())) {
+                    add_error("Error during writing or compression");
+                    return false;
+                }
+                output_buffer.clear();
+            }
+            return true;
+        };
+
+        auto format_coordinate = [](float f, char *buf) -> char* {
+#if EXPORT_3MF_USE_SPIRIT_KARMA_FP
+            // Slightly faster than sprintf("%.9g"), but there is an issue with the karma floating point formatter,
+            // https://github.com/boostorg/spirit/pull/586
+            // where the exported string is one digit shorter than it should be to guarantee lossless round trip.
+            // The code is left here for the ocasion boost guys improve.
+            coordinate_type_fixed      const coordinate_fixed      = coordinate_type_fixed();
+            coordinate_type_scientific const coordinate_scientific = coordinate_type_scientific();
+            // Format "f" in a fixed format.
+            char *ptr = buf;
+            boost::spirit::karma::generate(ptr, coordinate_fixed, f);
+            // Format "f" in a scientific format.
+            char *ptr2 = ptr;
+            boost::spirit::karma::generate(ptr2, coordinate_scientific, f);
+            // Return end of the shorter string.
+            auto len2 = ptr2 - ptr;
+            if (ptr - buf > len2) {
+                // Move the shorter scientific form to the front.
+                memcpy(buf, ptr, len2);
+                ptr = buf + len2;
+            }
+            // Return pointer to the end.
+            return ptr;
+#else
+            // Round-trippable float, shortest possible.
+            return buf + sprintf(buf, "%.9g", f);
+#endif
+        };
+
+        char buf[256];
         unsigned int vertices_count = 0;
         for (ModelVolume* volume : object.volumes)
         {
@@ -2385,16 +2494,27 @@ namespace Slic3r {
 
             for (size_t i = 0; i < its.vertices.size(); ++i)
             {
-                stream << "     <" << VERTEX_TAG << " ";
                 Vec3f v = (matrix * its.vertices[i].cast<double>()).cast<float>();
-                stream << "x=\"" << v(0) << "\" ";
-                stream << "y=\"" << v(1) << "\" ";
-                stream << "z=\"" << v(2) << "\" />\n";
+                char *ptr = buf;
+                boost::spirit::karma::generate(ptr, boost::spirit::lit("     <") << VERTEX_TAG << " x=\"");
+                ptr = format_coordinate(v.x(), ptr);
+                boost::spirit::karma::generate(ptr, "\" y=\"");
+                ptr = format_coordinate(v.y(), ptr);
+                boost::spirit::karma::generate(ptr, "\" z=\"");
+                ptr = format_coordinate(v.z(), ptr);
+                boost::spirit::karma::generate(ptr, "\"/>\n");
+                *ptr = '\0';
+                output_buffer += buf;
+                if (! flush())
+                    return false;
             }
         }
 
-        stream << "    </" << VERTICES_TAG << ">\n";
-        stream << "    <" << TRIANGLES_TAG << ">\n";
+        output_buffer += "    </";
+        output_buffer += VERTICES_TAG;
+        output_buffer += ">\n    <";
+        output_buffer += TRIANGLES_TAG;
+        output_buffer += ">\n";
 
         unsigned int triangles_count = 0;
         for (ModelVolume* volume : object.volumes)
@@ -2414,28 +2534,53 @@ namespace Slic3r {
 
             for (int i = 0; i < int(its.indices.size()); ++ i)
             {
-                stream << "     <" << TRIANGLE_TAG << " ";
-                for (int j = 0; j < 3; ++j)
                 {
-                    stream << "v" << j + 1 << "=\"" << its.indices[i][j] + volume_it->second.first_vertex_id << "\" ";
+                    const Vec3i &idx = its.indices[i];
+                    char *ptr = buf;
+                    boost::spirit::karma::generate(ptr, boost::spirit::lit("     <") << TRIANGLE_TAG <<
+                        " v1=\"" << boost::spirit::int_ <<
+                        "\" v2=\"" << boost::spirit::int_ <<
+                        "\" v3=\"" << boost::spirit::int_ << "\"",
+                        idx[0] + volume_it->second.first_vertex_id,
+                        idx[1] + volume_it->second.first_vertex_id,
+                        idx[2] + volume_it->second.first_vertex_id);
+                    *ptr = '\0';
+                    output_buffer += buf;
                 }
 
                 std::string custom_supports_data_string = volume->supported_facets.get_triangle_as_string(i);
-                if (! custom_supports_data_string.empty())
-                    stream << CUSTOM_SUPPORTS_ATTR << "=\"" << custom_supports_data_string << "\" ";
+                if (! custom_supports_data_string.empty()) {
+                    output_buffer += " ";
+                    output_buffer += CUSTOM_SUPPORTS_ATTR;
+                    output_buffer += "=\"";
+                    output_buffer += custom_supports_data_string;
+                    output_buffer += "\"";
+                }
 
                 std::string custom_seam_data_string = volume->seam_facets.get_triangle_as_string(i);
-                if (! custom_seam_data_string.empty())
-                    stream << CUSTOM_SEAM_ATTR << "=\"" << custom_seam_data_string << "\" ";
+                if (! custom_seam_data_string.empty()) {
+                    output_buffer += " ";
+                    output_buffer += CUSTOM_SEAM_ATTR;
+                    output_buffer += "=\"";
+                    output_buffer += custom_seam_data_string;
+                    output_buffer += "\"";
+                }
 
-                stream << "/>\n";
+                output_buffer += "/>\n";
+
+                if (! flush())
+                    return false;
             }
         }
 
-        stream << "    </" << TRIANGLES_TAG << ">\n";
-        stream << "   </" << MESH_TAG << ">\n";
+        output_buffer += "    </";
+        output_buffer += TRIANGLES_TAG;
+        output_buffer += ">\n   </";
+        output_buffer += MESH_TAG;
+        output_buffer += ">\n";
 
-        return true;
+        // Force flush.
+        return flush(true);
     }
 
     bool _3MF_Exporter::_add_build_to_model_stream(std::stringstream& stream, const BuildItemsList& build_items)
@@ -2460,7 +2605,7 @@ namespace Slic3r {
                         stream << " ";
                 }
             }
-            stream << "\" " << PRINTABLE_ATTR << "=\"" << item.printable << "\" />\n";
+            stream << "\" " << PRINTABLE_ATTR << "=\"" << item.printable << "\"/>\n";
         }
 
         stream << " </" << BUILD_TAG << ">\n";
@@ -2761,7 +2906,6 @@ namespace Slic3r {
                                     stream << prefix << SOURCE_VOLUME_ID_KEY << "\" " << VALUE_ATTR << "=\"" << volume->source.volume_idx << "\"/>\n";
                                     stream << prefix << SOURCE_OFFSET_X_KEY  << "\" " << VALUE_ATTR << "=\"" << volume->source.mesh_offset(0) << "\"/>\n";
                                     stream << prefix << SOURCE_OFFSET_Y_KEY  << "\" " << VALUE_ATTR << "=\"" << volume->source.mesh_offset(1) << "\"/>\n";
-                                    stream << prefix << SOURCE_OFFSET_Z_KEY  << "\" " << VALUE_ATTR << "=\"" << volume->source.mesh_offset(2) << "\"/>\n";
                                     stream << prefix << SOURCE_OFFSET_Z_KEY  << "\" " << VALUE_ATTR << "=\"" << volume->source.mesh_offset(2) << "\"/>\n";
                                 }
                                 if (volume->source.is_converted_from_inches)
