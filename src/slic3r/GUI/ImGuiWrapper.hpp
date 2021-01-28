@@ -31,6 +31,9 @@ class ImGuiWrapper
     unsigned m_mouse_buttons;
     bool m_disabled;
     bool m_new_frame_open;
+    bool m_dropshadows_enabled;
+    int m_dropshadow_size;
+    float m_dropshadow_max_alpha;
     std::string m_clipboard_text;
 
 public:
@@ -58,6 +61,9 @@ public:
     void set_next_window_pos(float x, float y, int flag, float pivot_x = 0.0f, float pivot_y = 0.0f);
     void set_next_window_bg_alpha(float alpha);
 	void set_next_window_size(float x, float y, ImGuiCond cond);
+
+    void set_enable_dropshadows(bool enable);
+    void set_dropshadow_params(int size, float max_alpha);
 
     bool begin(const std::string &name, int flags = 0);
     bool begin(const wxString &name, int flags = 0);
@@ -112,6 +118,7 @@ private:
     void render_draw_data(ImDrawData *draw_data);
     bool display_initialized() const;
     void destroy_font();
+    void draw_dropshadow(const ImVec2& tl, const ImVec2& br);
     std::vector<unsigned char> load_svg(const std::string& bitmap_name, unsigned target_width, unsigned target_height);
 
     static const char* clipboard_get(void* user_data);
