@@ -177,36 +177,35 @@ void PrintObject::planar_bulging_compensation() {
         
         // Static Vars
 		static constexpr size_t PlanarBulgeDistFromSurface = 4; // Skip first and last few layers
-		static constexpr size_t PlanarBulgeSearchDistance = 3; // Number of layers to search for solid-top layer below, uses exponential decay for layers beyond 1
-
-        assert(PlanarBulgeSearchDistance > 0);
         assert(PlanarBulgeDistFromSurface > 0);
 
         // Lambdas
 		// Find an exponentially-decayed value when distance from solid layer > 1
-		auto ExponentiallyDecayedCompensation = [scale_factor](const int dist) -> float {
-			return expf(-2.0f * ((float)dist / (float)(PlanarBulgeSearchDistance + 1))) * scale_factor;
+        const auto ExponentiallyDecayedCompensation = [scale_factor](const int dist, const int search_distance) -> float {
+			return expf(-2.0f * ((float)dist / (float)(search_distance + 1))) * scale_factor;
 		};
 
         // Use linear decay
-        const auto LinearlyDecayedCompensation = [scale_factor](const int dist) -> float {
-            return (1.0f - ((float)dist / (float)(PlanarBulgeSearchDistance + 1))) * scale_factor;
+        const auto LinearlyDecayedCompensation = [scale_factor](const int dist, const int search_distance) -> float {
+            return (1.0f - ((float)dist / (float)(search_distance + 1))) * scale_factor;
         };
 
 		// We have to detect top surfaces, since they aren't detected yet... they are reset later
         // back to stInternal.
 		this->detect_surfaces_type();
 
-        std::vector<size_t> flat_surface_idxs;
+        // <index, search_distance of region>
+        std::vector<std::pair<size_t, size_t>> flat_surface_idxs;
 
         // Go through layers, and find distance to solid layer from each.
-		for (Layer* l : this->m_layers) {
+		for (const Layer* const l : this->m_layers) {
             if (l->id() >= PlanarBulgeDistFromSurface && l->id() <= (this->layer_count() - PlanarBulgeDistFromSurface)) {
 
                 for (size_t region_idx = 0; region_idx < l->region_count(); ++region_idx) {
                     const LayerRegion& r = *l->regions()[region_idx];
                     if (r.slices.has(stTop) && r.slices.has_solid()) {
-                        flat_surface_idxs.emplace_back(l->id());
+                        flat_surface_idxs.emplace_back((l->id() + 1), 
+                            (size_t)m_print->get_region(region_idx)->config().top_solid_layers.value);
                         break;
                     }// check for top solid surface
                 } // for loop, iterate through regions
@@ -217,32 +216,21 @@ void PrintObject::planar_bulging_compensation() {
         std::vector<bool> layer_updated(this->layer_count(), false);
 
         // Go through and adjust layers
-        for (const auto& idx : flat_surface_idxs) {
-            int lower_bound = (int)idx - (int)PlanarBulgeSearchDistance;
-            int upper_bound = (int)idx + (int)PlanarBulgeSearchDistance;
+        for (const std::pair<size_t, size_t>& ent : flat_surface_idxs) {
+            const size_t search_distance = ent.second;
 
-            // Clamp bounds
-            if (lower_bound < (int)PlanarBulgeDistFromSurface) 
-                lower_bound = (int)PlanarBulgeDistFromSurface;
-            if (upper_bound > ((int)this->layer_count() - (int)PlanarBulgeDistFromSurface))
-                upper_bound = ((int)this->layer_count() - (int)PlanarBulgeDistFromSurface);
+            for (int i = -(int)(search_distance); i <= (int)search_distance; i++) {
+                if (i == 0) continue; // We don't want to modify the actual top layer.
 
-            // Iterate through and update layers
-            for (int i = lower_bound; i <= upper_bound; ++i) {
-                if (layer_updated[i]) continue;
+                const int lidx = ent.first + i;
+				if (layer_updated[lidx]) continue;
 
-                // Get associated layer
-                Layer* l = this->m_layers[i];
-                const int dist = (int)fabsf(idx - i);
-                const float final_comp = LinearlyDecayedCompensation(dist);
+                if (lidx < (int)PlanarBulgeDistFromSurface) continue;
+                if (lidx > (this->layer_count() - (int)PlanarBulgeDistFromSurface)) continue;
 
-                if (final_comp > 0.0f) {
-                    // Use lslices, as they are later used to reset slice types back to stInternal (uninitialized).
-                    l->lslices = offset_ex(l->lslices, -1.0f * final_comp); // Use negative to shrink
-                }
-
-                // Set updated
-                layer_updated[i] = true;
+                this->m_layers[lidx]->lslices = offset_ex(this->m_layers[lidx]->lslices, 
+                    -1.0f * LinearlyDecayedCompensation((int)abs(i), search_distance));
+				layer_updated[lidx] = true;
             }
         }
 	}
