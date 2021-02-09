@@ -1084,7 +1084,7 @@ void PrintConfigDef::init_fff_params()
 	def->tooltip = L("The amount by which layers directly above solid layers are reduced to compensate for planar bulging.");
 	def->mode = comAdvanced;
     def->sidetext = L("mm");
-	def->set_default_value(new ConfigOptionFloat(0.2));
+	def->set_default_value(new ConfigOptionFloat(0.1));
 
     def = this->add("gap_fill_speed", coFloat);
     def->label = L("Gap fill");

@@ -47,6 +47,11 @@ public:
             if (surface.surface_type == type) return true;
         return false;
     }
+	bool has_solid() const {
+		for (const Surface& surface : this->surfaces)
+			if (surface.is_solid()) return true;
+		return false;
+	}
 
     void set(const SurfaceCollection &coll) { surfaces = coll.surfaces; }
     void set(SurfaceCollection &&coll) { surfaces = std::move(coll.surfaces); }

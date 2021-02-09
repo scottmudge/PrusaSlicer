@@ -398,8 +398,11 @@ void PerimeterGenerator::process()
     // fuzzy skin configuration
     double fuzzy_skin_thickness;
     double fuzzy_skin_point_dist;
+    // No reason to de-reference this parameter so many times
+	const FuzzySkinPerimeterMode fuzzy_skin = this->object_config->fuzzy_skin_perimeter_mode.value; 
+
     //FuzzyShape fuzzy_skin_shape;
-    if (this->object_config->fuzzy_skin_perimeter_mode != FuzzySkinPerimeterMode::None) {
+    if (fuzzy_skin != FuzzySkinPerimeterMode::None) {
         /*
         switch (this->object_config->fuzzy_skin_shape) {
         case FuzzySkinShape::Triangle1:
@@ -511,12 +514,9 @@ void PerimeterGenerator::process()
 
                     bool skip_polygon = false;
 
-                    if (this->object_config->fuzzy_skin_perimeter_mode != FuzzySkinPerimeterMode::None) {
-                        if (i == 0 && (this->object_config->fuzzy_skin_perimeter_mode != FuzzySkinPerimeterMode::ExternalSkipFirst || this->layer_id > 0)) {
-                            if (
-                                this->object_config->fuzzy_skin_perimeter_mode == FuzzySkinPerimeterMode::External ||
-                                this->object_config->fuzzy_skin_perimeter_mode ==  FuzzySkinPerimeterMode::ExternalSkipFirst
-                            ) {
+                    if (fuzzy_skin != FuzzySkinPerimeterMode::None) {
+                        if (i == 0 && (fuzzy_skin != FuzzySkinPerimeterMode::ExternalSkipFirst || this->layer_id > 0)) {
+                            if (fuzzy_skin == FuzzySkinPerimeterMode::External || fuzzy_skin ==  FuzzySkinPerimeterMode::ExternalSkipFirst) {
                                 ExPolygon expolygon_fuzzy(expolygon);
                                 fuzzy_polygon(expolygon_fuzzy.contour, /* fuzzy_skin_shape, */ fuzzy_skin_thickness, fuzzy_skin_point_dist);
                                 // compensate for the depth of intersection.

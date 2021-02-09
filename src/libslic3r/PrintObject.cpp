@@ -143,6 +143,70 @@ void PrintObject::slice()
     this->set_done(posSlice);
 }
 
+// This is meant to reduce the effect of "planar bulging" above top, solid surfaces. This
+// type of bulging can produce distinct lines on the outer surface. The exact cause isn't
+// clear, but its produced by a certain degree outward "squish", similar to the elephant-
+// foot effect. A similar fix is used, which simply shrinks the layer on the X/Y-axis by 
+// a pre-determined amount.
+void PrintObject::planar_bulging_compensation() {
+	if (this->m_config.planar_bulging_comp.value) {
+		m_print->set_status(20, L("Performing planar bulging compensation"));
+		BOOST_LOG_TRIVIAL(info) << "Performing planar bulging compensation..." << log_memory_info();
+
+		// We have to detect top surfaces, since they aren't detected yet.
+		this->detect_surfaces_type();
+
+		for (Layer* layer : m_layers) {
+			// Planar bulging compensation
+			static constexpr size_t PlanarBulgeMinLayer = 5; // Skip first few layers
+			static constexpr size_t PlanarBulgeSearchDistance = 3; // Number of layers to search for solid-top layer below, uses exponential decay for layers beyond 1
+			int distance_from_solid_top_layer = -1;
+
+			if (layer->id() >= PlanarBulgeMinLayer) {
+
+				Layer* cur_layer = layer; // Set later to lower layer (see loop).
+				for (size_t layer_below = 0; layer_below < PlanarBulgeSearchDistance; ++layer_below) {
+					cur_layer = cur_layer->lower_layer;
+					if (cur_layer == nullptr) break;
+
+					const LayerRegionPtrs const lower_regions = cur_layer->regions();
+					for (size_t i = 0; i < cur_layer->region_count(); ++i) {
+						const LayerRegion& r = *lower_regions[i];
+						if (r.slices.has(stTop) && r.slices.has_solid()) {
+							distance_from_solid_top_layer = layer_below + 1;
+							break;
+						}// check for top solid surface
+					} // for loop, iterate through regions
+				}// for search, layers below current
+			} // using planar bulge comp
+
+
+            // Perform offset here
+			if (distance_from_solid_top_layer > 0) {
+				const float scale_factor = scale_((float)layer->object()->config().planar_bulging_amount.value);
+
+                // Lambda to find an exponentially-decayed value when distance from solid layer > 1
+				const auto GetDecayedCompensation = [scale_factor](const int dist) -> float {
+					const float val = expf(
+						-2.0f * (
+							((float)dist - 1.0f) / // Move distance to 0.0
+							((float)PlanarBulgeSearchDistance - 1.0f) // Translate search distance
+							)
+					);
+
+					return val * scale_factor;
+				};
+
+				const float final_comp = GetDecayedCompensation(distance_from_solid_top_layer);
+                if (final_comp > 0.0f) {
+                    // Use l-slices, since it's used in the restore_untyped_slices() method below.
+                    layer->lslices = offset_ex(layer->lslices, -1.0f * final_comp);
+                }
+			}
+		}
+	}
+}
+
 // 1) Merges typed region slices into stInternal type.
 // 2) Increases an "extra perimeters" counter at region slices where needed.
 // 3) Generates perimeters, gap fills and fill regions (fill regions of type stInternal).
@@ -154,9 +218,12 @@ void PrintObject::make_perimeters()
     if (! this->set_started(posPerimeters))
         return;
 
+    // Planar bulging compensation, this needs to happen before the perimeters and fill are computed.
+    this->planar_bulging_compensation();
+
     m_print->set_status(20, L("Generating perimeters"));
     BOOST_LOG_TRIVIAL(info) << "Generating perimeters..." << log_memory_info();
-    
+
     // Revert the typed slices into untyped slices.
     if (m_typed_slices) {
         for (Layer *layer : m_layers) {
