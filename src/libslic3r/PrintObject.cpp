@@ -143,67 +143,108 @@ void PrintObject::slice()
     this->set_done(posSlice);
 }
 
-// This is meant to reduce the effect of "planar bulging" above top, solid surfaces. This
-// type of bulging can produce distinct lines on the outer surface. The exact cause isn't
-// clear, but its produced by a certain degree outward "squish", similar to the elephant-
-// foot effect. A similar fix is used, which simply shrinks the layer on the X/Y-axis by 
-// a pre-determined amount.
+/* This is meant to reduce the effect of "planar bulging" above top, solid surfaces. This
+	type of bulging can produce distinct lines on the outer surface. The exact cause isn't
+	clear, but its produced by a certain degree outward "squish", similar to the elephant-
+	foot effect. A similar fix is used, which simply shrinks the layer on the X/Y-axis by
+	a pre-determined amount.
+
+    The bulging effect is similar to:
+
+    --------
+            |
+            |
+            |
+    ________\   < The horiz. line here is a large, flat, planar top-surface. A "squishing"
+            /        out is sometimes visible on flat, vertical walls.
+            |
+            |
+            |
+    --------
+
+    The compensation marginally shrinks back those layers, and the decay distance is a function
+    of how many layers the horizontal shells are. Quadratic decay was tested, but linear decay
+    worked a bit better.
+
+*/
 void PrintObject::planar_bulging_compensation() {
 	if (this->m_config.planar_bulging_comp.value) {
 		m_print->set_status(20, L("Performing planar bulging compensation"));
 		BOOST_LOG_TRIVIAL(info) << "Performing planar bulging compensation..." << log_memory_info();
 
-		// We have to detect top surfaces, since they aren't detected yet.
+        // Dynamic Vars
+        const float scale_factor = scale_((float)this->m_config.planar_bulging_amount.value);
+        
+        // Static Vars
+		static constexpr size_t PlanarBulgeDistFromSurface = 4; // Skip first and last few layers
+		static constexpr size_t PlanarBulgeSearchDistance = 3; // Number of layers to search for solid-top layer below, uses exponential decay for layers beyond 1
+
+        assert(PlanarBulgeSearchDistance > 0);
+        assert(PlanarBulgeDistFromSurface > 0);
+
+        // Lambdas
+		// Find an exponentially-decayed value when distance from solid layer > 1
+		auto ExponentiallyDecayedCompensation = [scale_factor](const int dist) -> float {
+			return expf(-2.0f * ((float)dist / (float)PlanarBulgeSearchDistance)) * scale_factor;
+		};
+
+        // Use linear decay
+        const auto LinearlyDecayedCompensation = [scale_factor](const int dist) -> float {
+            return (1.0f - ((float)dist / (float)PlanarBulgeSearchDistance)) * scale_factor;
+        };
+
+		// We have to detect top surfaces, since they aren't detected yet... they are reset later
+        // back to stInternal.
 		this->detect_surfaces_type();
 
-		for (Layer* layer : m_layers) {
-			// Planar bulging compensation
-			static constexpr size_t PlanarBulgeMinLayer = 5; // Skip first few layers
-			static constexpr size_t PlanarBulgeSearchDistance = 3; // Number of layers to search for solid-top layer below, uses exponential decay for layers beyond 1
-			int distance_from_solid_top_layer = -1;
+        std::vector<size_t> flat_surface_idxs;
 
-			if (layer->id() >= PlanarBulgeMinLayer) {
+        // Go through layers, and find distance to solid layer from each.
+		for (Layer* l : this->m_layers) {
+            if (l->id() >= PlanarBulgeDistFromSurface && l->id() <= (this->layer_count() - PlanarBulgeDistFromSurface)) {
 
-				Layer* cur_layer = layer; // Set later to lower layer (see loop).
-				for (size_t layer_below = 0; layer_below < PlanarBulgeSearchDistance; ++layer_below) {
-					cur_layer = cur_layer->lower_layer;
-					if (cur_layer == nullptr) break;
-
-					const LayerRegionPtrs const lower_regions = cur_layer->regions();
-					for (size_t i = 0; i < cur_layer->region_count(); ++i) {
-						const LayerRegion& r = *lower_regions[i];
-						if (r.slices.has(stTop) && r.slices.has_solid()) {
-							distance_from_solid_top_layer = layer_below + 1;
-							break;
-						}// check for top solid surface
-					} // for loop, iterate through regions
-				}// for search, layers below current
-			} // using planar bulge comp
-
-
-            // Perform offset here
-			if (distance_from_solid_top_layer > 0) {
-				const float scale_factor = scale_((float)layer->object()->config().planar_bulging_amount.value);
-
-                // Lambda to find an exponentially-decayed value when distance from solid layer > 1
-				const auto GetDecayedCompensation = [scale_factor](const int dist) -> float {
-					const float val = expf(
-						-2.0f * (
-							((float)dist - 1.0f) / // Move distance to 0.0
-							((float)PlanarBulgeSearchDistance - 1.0f) // Translate search distance
-							)
-					);
-
-					return val * scale_factor;
-				};
-
-				const float final_comp = GetDecayedCompensation(distance_from_solid_top_layer);
-                if (final_comp > 0.0f) {
-                    // Use l-slices, since it's used in the restore_untyped_slices() method below.
-                    layer->lslices = offset_ex(layer->lslices, -1.0f * final_comp);
-                }
-			}
+                for (size_t region_idx = 0; region_idx < l->region_count(); ++region_idx) {
+                    const LayerRegion& r = *l->regions()[region_idx];
+                    if (r.slices.has(stTop) && r.slices.has_solid()) {
+                        flat_surface_idxs.emplace_back(l->id());
+                        break;
+                    }// check for top solid surface
+                } // for loop, iterate through regions
+            }
 		}
+
+        // Keep track of which layers were already modified... just in case some are close together.
+        std::vector<bool> layer_updated(this->layer_count(), false);
+
+        // Go through and adjust layers
+        for (const auto& idx : flat_surface_idxs) {
+            int lower_bound = (int)idx - (int)PlanarBulgeSearchDistance;
+            int upper_bound = (int)idx + (int)PlanarBulgeSearchDistance;
+
+            // Clamp bounds
+            if (lower_bound < (int)PlanarBulgeDistFromSurface) 
+                lower_bound = (int)PlanarBulgeDistFromSurface;
+            if (upper_bound > ((int)this->layer_count() - (int)PlanarBulgeDistFromSurface))
+                upper_bound = ((int)this->layer_count() - (int)PlanarBulgeDistFromSurface);
+
+            // Iterate through and update layers
+            for (int i = lower_bound; i <= upper_bound; ++i) {
+                if (layer_updated[i]) continue;
+
+                // Get associated layer
+                Layer* l = this->m_layers[i];
+                const int dist = (int)fabsf(idx - i);
+                const float final_comp = LinearlyDecayedCompensation(dist);
+
+                if (final_comp > 0.0f) {
+                    // Use lslices, as they are later used to reset slice types back to stInternal (uninitialized).
+                    l->lslices = offset_ex(l->lslices, -1.0f * LinearlyDecayedCompensation(dist)); // Use negative to shrink
+                }
+
+                // Set updated
+                layer_updated[i] = true;
+            }
+        }
 	}
 }
 
@@ -678,7 +719,9 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             // normal infill and 100% (solid) infill.
                opt_key == "fill_density"
             // for perimeter - infill overlap
-            || opt_key == "solid_infill_extrusion_width") {
+            || opt_key == "solid_infill_extrusion_width"
+            || opt_key == "planar_bulging_comp" 
+            || opt_key == "planar_bulging_amount") {
             steps.emplace_back(posPerimeters);
             steps.emplace_back(posPrepareInfill);
         } else if (
