@@ -522,6 +522,9 @@ public:
     ConfigOptionFloatOrPercent      support_material_xy_spacing;
     ConfigOptionFloat               xy_size_compensation;
     ConfigOptionBool                wipe_into_objects;
+	// Compensation amount for coplanar bulging
+	ConfigOptionBool                planar_bulging_comp;
+	ConfigOptionFloat               planar_bulging_amount;
 
 protected:
     void initialize(StaticCacheBase &cache, const char *base_ptr)
@@ -565,6 +568,8 @@ protected:
         OPT_PTR(support_material_with_sheath);
         OPT_PTR(xy_size_compensation);
         OPT_PTR(wipe_into_objects);
+		OPT_PTR(planar_bulging_comp);
+		OPT_PTR(planar_bulging_amount);
     }
 };
 

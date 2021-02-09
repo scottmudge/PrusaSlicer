@@ -1071,6 +1071,21 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionFloat(0.8));
 
+	def = this->add("planar_bulging_comp", coBool);
+	def->label = L("Planar bulging compensation");
+	def->category = L("Layers and Perimeters");
+	def->tooltip = L("Reduce X/Y dimensions perimeters directly above large planar areas to copmpensate for planar bulging effect.");
+	def->mode = comAdvanced;
+	def->set_default_value(new ConfigOptionBool(true));
+
+	def = this->add("planar_bulging_amount", coFloat);
+	def->label = L("Planar bulging compensation amount");
+	def->category = L("Layers and Perimeters");
+	def->tooltip = L("The amount by which layers directly above solid layers are reduced to compensate for planar bulging.");
+	def->mode = comAdvanced;
+    def->sidetext = L("mm");
+	def->set_default_value(new ConfigOptionFloat(0.2));
+
     def = this->add("gap_fill_speed", coFloat);
     def->label = L("Gap fill");
     def->category = L("Speed");

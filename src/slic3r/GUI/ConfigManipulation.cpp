@@ -296,6 +296,9 @@ void ConfigManipulation::toggle_print_fff_options(DynamicPrintConfig* config)
     for (auto el : { "ironing_type", "ironing_flowrate", "ironing_spacing", "ironing_speed" })
     	toggle_field(el, has_ironing);
 
+    bool has_pln_bulge_comp = config->opt_bool("planar_bulging_comp");
+    toggle_field("planar_bulging_amount", has_pln_bulge_comp);
+
     bool have_sequential_printing = config->opt_bool("complete_objects");
     for (auto el : { "extruder_clearance_radius", "extruder_clearance_height" })
         toggle_field(el, have_sequential_printing);

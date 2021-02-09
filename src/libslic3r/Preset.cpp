@@ -412,6 +412,7 @@ const std::vector<std::string>& Preset::print_options()
     	"ironing", "ironing_type", "ironing_flowrate", "ironing_speed", "ironing_spacing",
         "max_print_speed", "max_volumetric_speed", "avoid_crossing_perimeters_max_detour",
         "fuzzy_skin_perimeter_mode", /* "fuzzy_skin_shape", */ "fuzzy_skin_thickness", "fuzzy_skin_point_dist",
+        "planar_bulging_comp", "planar_bulging_amount",
 #ifdef HAS_PRESSURE_EQUALIZER
         "max_volumetric_extrusion_rate_slope_positive", "max_volumetric_extrusion_rate_slope_negative",
 #endif /* HAS_PRESSURE_EQUALIZER */
