@@ -185,12 +185,12 @@ void PrintObject::planar_bulging_compensation() {
         // Lambdas
 		// Find an exponentially-decayed value when distance from solid layer > 1
 		auto ExponentiallyDecayedCompensation = [scale_factor](const int dist) -> float {
-			return expf(-2.0f * ((float)dist / (float)PlanarBulgeSearchDistance)) * scale_factor;
+			return expf(-2.0f * ((float)dist / (float)(PlanarBulgeSearchDistance + 1))) * scale_factor;
 		};
 
         // Use linear decay
         const auto LinearlyDecayedCompensation = [scale_factor](const int dist) -> float {
-            return (1.0f - ((float)dist / (float)PlanarBulgeSearchDistance)) * scale_factor;
+            return (1.0f - ((float)dist / (float)(PlanarBulgeSearchDistance + 1))) * scale_factor;
         };
 
 		// We have to detect top surfaces, since they aren't detected yet... they are reset later
@@ -238,7 +238,7 @@ void PrintObject::planar_bulging_compensation() {
 
                 if (final_comp > 0.0f) {
                     // Use lslices, as they are later used to reset slice types back to stInternal (uninitialized).
-                    l->lslices = offset_ex(l->lslices, -1.0f * LinearlyDecayedCompensation(dist)); // Use negative to shrink
+                    l->lslices = offset_ex(l->lslices, -1.0f * final_comp); // Use negative to shrink
                 }
 
                 // Set updated
@@ -719,9 +719,7 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             // normal infill and 100% (solid) infill.
                opt_key == "fill_density"
             // for perimeter - infill overlap
-            || opt_key == "solid_infill_extrusion_width"
-            || opt_key == "planar_bulging_comp" 
-            || opt_key == "planar_bulging_amount") {
+            || opt_key == "solid_infill_extrusion_width") {
             steps.emplace_back(posPerimeters);
             steps.emplace_back(posPrepareInfill);
         } else if (
