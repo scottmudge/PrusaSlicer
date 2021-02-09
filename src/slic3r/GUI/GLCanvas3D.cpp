@@ -2,7 +2,6 @@
 #include "GLCanvas3D.hpp"
 
 #include "admesh/stl.h"
-#include "polypartition.h"
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/GCode/ThumbnailData.hpp"
@@ -68,20 +67,20 @@
 
 #include <imgui/imgui_internal.h>
 
-static const float TRACKBALLSIZE = 0.8f;
+static constexpr const float TRACKBALLSIZE = 0.8f;
 
-static const float DEFAULT_BG_DARK_COLOR[3] = { 0.478f, 0.478f, 0.478f };
-static const float DEFAULT_BG_LIGHT_COLOR[3] = { 0.753f, 0.753f, 0.753f };
-static const float ERROR_BG_DARK_COLOR[3] = { 0.478f, 0.192f, 0.039f };
-static const float ERROR_BG_LIGHT_COLOR[3] = { 0.753f, 0.192f, 0.039f };
-//static const float AXES_COLOR[3][3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
+static constexpr const float DEFAULT_BG_DARK_COLOR[3] = { 0.478f, 0.478f, 0.478f };
+static constexpr const float DEFAULT_BG_LIGHT_COLOR[3] = { 0.753f, 0.753f, 0.753f };
+static constexpr const float ERROR_BG_DARK_COLOR[3] = { 0.478f, 0.192f, 0.039f };
+static constexpr const float ERROR_BG_LIGHT_COLOR[3] = { 0.753f, 0.192f, 0.039f };
+//static constexpr const float AXES_COLOR[3][3] = { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f } };
 
 // Number of floats
-static const size_t MAX_VERTEX_BUFFER_SIZE     = 131072 * 6; // 3.15MB
+static constexpr const size_t MAX_VERTEX_BUFFER_SIZE     = 131072 * 6; // 3.15MB
 // Reserve size in number of floats.
-static const size_t VERTEX_BUFFER_RESERVE_SIZE = 131072 * 2; // 1.05MB
+static constexpr const size_t VERTEX_BUFFER_RESERVE_SIZE = 131072 * 2; // 1.05MB
 // Reserve size in number of floats, maximum sum of all preallocated buffers.
-static const size_t VERTEX_BUFFER_RESERVE_SIZE_SUM_MAX = 1024 * 1024 * 128 / 4; // 128MB
+static constexpr const size_t VERTEX_BUFFER_RESERVE_SIZE_SUM_MAX = 1024 * 1024 * 128 / 4; // 128MB
 
 namespace Slic3r {
 namespace GUI {
@@ -631,12 +630,12 @@ void GLCanvas3D::WarningTexture::activate(WarningTexture::Warning warning, bool 
     std::string text;
     bool error = false;
     switch (warning) {
-    case ObjectOutside: text = L("An object outside the print area was detected."); break;
-    case ToolpathOutside: text = L("A toolpath outside the print area was detected."); error = true; break;
-    case SlaSupportsOutside: text = L("SLA supports outside the print area were detected."); error = true; break;
-    case SomethingNotShown: text = L("Some objects are not visible."); break;
+    case ObjectOutside: text = _u8L("An object outside the print area was detected."); break;
+    case ToolpathOutside: text = _u8L("A toolpath outside the print area was detected."); error = true; break;
+    case SlaSupportsOutside: text = _u8L("SLA supports outside the print area were detected."); error = true; break;
+    case SomethingNotShown: text = _u8L("Some objects are not visible."); break;
     case ObjectClashed:
-        text = L( "An object outside the print area was detected.\n"
+        text = _u8L( "An object outside the print area was detected.\n"
                   "Resolve the current problem to continue slicing.");
         error = true;
         break;
@@ -1181,7 +1180,7 @@ GLCanvas3D::GLCanvas3D(wxGLCanvas* canvas)
 #endif // ENABLE_RENDER_PICKING_PASS
     , m_render_sla_auxiliaries(true)
     , m_labels(*this)
-    , m_slope(*this, m_volumes)
+    , m_slope(m_volumes)
 {
     if (m_canvas != nullptr) {
         m_timer.SetOwner(m_canvas);
@@ -4582,9 +4581,9 @@ bool GLCanvas3D::_init_main_toolbar()
                                                 "\n" + "[" + GUI::shortkey_ctrl_prefix() + "4] - " + _u8L("Printer Settings Tab") ;
     item.sprite_id = 10;
     item.enabling_callback    = GLToolbarItem::Default_Enabling_Callback;
-    item.visibility_callback  = [this]() { return (wxGetApp().app_config->get("new_settings_layout_mode") == "1" ||
-                                                   wxGetApp().app_config->get("dlg_settings_layout_mode") == "1"); };
-    item.left.action_callback = [this]() { wxGetApp().mainframe->select_tab(); };
+    item.visibility_callback  = []() { return (wxGetApp().app_config->get("new_settings_layout_mode") == "1" ||
+                                               wxGetApp().app_config->get("dlg_settings_layout_mode") == "1"); };
+    item.left.action_callback = []() { wxGetApp().mainframe->select_tab(); };
     if (!m_main_toolbar.add_item(item))
         return false;
 
@@ -5680,7 +5679,7 @@ void GLCanvas3D::_load_print_toolpaths()
     if (!print->is_step_done(psSkirt) || !print->is_step_done(psBrim))
         return;
 
-    if (!print->has_skirt() && (print->config().brim_width.value == 0))
+    if (!print->has_skirt() && !print->has_brim())
         return;
 
     const float color[] = { 0.5f, 1.0f, 0.5f, 1.0f }; // greenish
@@ -5692,7 +5691,7 @@ void GLCanvas3D::_load_print_toolpaths()
         total_layer_count = std::max(total_layer_count, print_object->total_layer_count());
     }
     size_t skirt_height = print->has_infinite_skirt() ? total_layer_count : std::min<size_t>(print->config().skirt_height.value, total_layer_count);
-    if ((skirt_height == 0) && (print->config().brim_width.value > 0))
+    if ((skirt_height == 0) && print->has_brim())
         skirt_height = 1;
 
     // Get first skirt_height layers.
@@ -5822,7 +5821,7 @@ void GLCanvas3D::_load_print_object_toolpaths(const PrintObject& print_object, c
         int get_color_idx_for_tool_change(std::vector<CustomGCode::Item>::const_iterator it, const int extruder) const
         {
             const int current_extruder = it->extruder == 0 ? extruder : it->extruder;
-            if (number_tools() == extruders_cnt + 1) // there is no one "M600"
+            if (number_tools() == size_t(extruders_cnt + 1)) // there is no one "M600"
                 return std::min<int>(extruders_cnt - 1, std::max<int>(current_extruder - 1, 0));
 
             auto it_n = it;
@@ -5910,8 +5909,7 @@ void GLCanvas3D::_load_print_object_toolpaths(const PrintObject& print_object, c
         tbb::blocked_range<size_t>(0, ctxt.layers.size(), grain_size),
         [&ctxt, &new_volume, is_selected_separate_extruder, this](const tbb::blocked_range<size_t>& range) {
         GLVolumePtrs 		vols;
-        std::vector<size_t>	color_print_layer_to_glvolume;
-        auto                volume = [&ctxt, &vols, &color_print_layer_to_glvolume, &range](size_t layer_idx, int extruder, int feature) -> GLVolume& {            
+        auto                volume = [&ctxt, &vols](size_t layer_idx, int extruder, int feature) -> GLVolume& {
             return *vols[ctxt.color_by_color_print()?
                 ctxt.color_print_color_idx_by_layer_idx_and_extruder(layer_idx, extruder) :
 				ctxt.color_by_tool() ? 

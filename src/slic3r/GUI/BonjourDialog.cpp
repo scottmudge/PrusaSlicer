@@ -108,8 +108,7 @@ bool BonjourDialog::show_and_lookup()
 	timer->SetOwner(this);
 	timer_state = 1;
 	timer->Start(1000);
-	wxTimerEvent evt_dummy;
-	on_timer(evt_dummy);
+    on_timer_process();
 
 	// The background thread needs to queue messages for this dialog
 	// and for that it needs a valid pointer to it (mandated by the wxWidgets API).
@@ -120,7 +119,7 @@ bool BonjourDialog::show_and_lookup()
 	// Note: More can be done here when we support discovery of hosts other than Octoprint and SL1
 	Bonjour::TxtKeys txt_keys { "version", "model" };
 
-	bonjour = std::move(Bonjour("octoprint")
+    bonjour = Bonjour("octoprint")
 		.set_txt_keys(std::move(txt_keys))
 		.set_retries(3)
 		.set_timeout(4)
@@ -140,8 +139,7 @@ bool BonjourDialog::show_and_lookup()
 				wxQueueEvent(dialog, evt);
 			}
 		})
-		.lookup()
-	);
+		.lookup();
 
 	bool res = ShowModal() == wxID_OK && list->GetFirstSelected() >= 0;
 	{
@@ -215,17 +213,26 @@ void BonjourDialog::on_reply(BonjourReplyEvent &e)
 
 void BonjourDialog::on_timer(wxTimerEvent &)
 {
+    on_timer_process();
+}
+
+// This is here so the function can be bound to wxEVT_TIMER and also called
+// explicitly (wxTimerEvent should not be created by user code).
+void BonjourDialog::on_timer_process()
+{
     const auto search_str = _utf8(L("Searching for devices"));
 
-	if (timer_state > 0) {
-		const std::string dots(timer_state, '.');
+    if (timer_state > 0) {
+        const std::string dots(timer_state, '.');
         label->SetLabel(GUI::from_u8((boost::format("%1% %2%") % search_str % dots).str()));
-		timer_state = (timer_state) % 3 + 1;
-	} else {
+        timer_state = (timer_state) % 3 + 1;
+    } else {
         label->SetLabel(GUI::from_u8((boost::format("%1%: %2%") % search_str % (_utf8(L("Finished"))+".")).str()));
-		timer->Stop();
-	}
+        timer->Stop();
+    }
 }
+
+
 
 
 }

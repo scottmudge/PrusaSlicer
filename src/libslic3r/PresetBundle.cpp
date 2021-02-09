@@ -105,8 +105,33 @@ PresetBundle::PresetBundle() :
     this->project_config.apply_only(FullPrintConfig::defaults(), s_project_options);
 }
 
-PresetBundle::~PresetBundle()
+PresetBundle::PresetBundle(const PresetBundle &rhs)
 {
+    *this = rhs;
+}
+
+PresetBundle& PresetBundle::operator=(const PresetBundle &rhs)
+{
+    prints              = rhs.prints;
+    sla_prints          = rhs.sla_prints;
+    filaments           = rhs.filaments;
+    sla_materials       = rhs.sla_materials;
+    printers            = rhs.printers;
+    physical_printers   = rhs.physical_printers;
+
+    filament_presets    = rhs.filament_presets;
+    project_config      = rhs.project_config;
+    vendors             = rhs.vendors;
+    obsolete_presets    = rhs.obsolete_presets;
+
+    // Adjust Preset::vendor pointers to point to the copied vendors map.
+    prints       .update_vendor_ptrs_after_copy(this->vendors);
+    sla_prints   .update_vendor_ptrs_after_copy(this->vendors);
+    filaments    .update_vendor_ptrs_after_copy(this->vendors);
+    sla_materials.update_vendor_ptrs_after_copy(this->vendors);
+    printers     .update_vendor_ptrs_after_copy(this->vendors);
+
+    return *this;
 }
 
 void PresetBundle::reset(bool delete_files)
@@ -800,10 +825,9 @@ void PresetBundle::load_config_file_config(const std::string &name_or_path, bool
             compatible_printers_condition = compatible_printers_condition_values[1];
 			compatible_prints_condition   = compatible_prints_condition_values.front();
 			Preset                *loaded = nullptr;
-			if (is_external) {
-				auto [aloaded, modified] = this->filaments.load_external_preset(name_or_path, name, old_filament_profile_names->values.front(), config);
-                loaded = aloaded;
-			} else {
+            if (is_external)
+                loaded = this->filaments.load_external_preset(name_or_path, name, old_filament_profile_names->values.front(), config).first;
+            else {
                 // called from Config Wizard.
 				loaded= &this->filaments.load_preset(this->filaments.path_from_name(name), name, config);
 				loaded->save();
@@ -891,7 +915,7 @@ void PresetBundle::load_config_file_config_bundle(const std::string &path, const
     std::string bundle_name = std::string(" - ") + boost::filesystem::path(path).filename().string();
 
     // 2) Extract active configs from the config bundle, copy them and activate them in this bundle.
-    auto load_one = [this, &path, &bundle_name](PresetCollection &collection_dst, PresetCollection &collection_src, const std::string &preset_name_src, bool activate) -> std::string {
+    auto load_one = [&path, &bundle_name](PresetCollection &collection_dst, PresetCollection &collection_src, const std::string &preset_name_src, bool activate) -> std::string {
         Preset *preset_src = collection_src.find_preset(preset_name_src, false);
         Preset *preset_dst = collection_dst.find_preset(preset_name_src, false);
         assert(preset_src != nullptr);
@@ -1145,33 +1169,26 @@ size_t PresetBundle::load_configbundle(const std::string &path, unsigned int fla
 
     for (const auto &section : tree) {
         PresetCollection         *presets = nullptr;
-        std::vector<std::string> *loaded  = nullptr;
         std::string               preset_name;
         PhysicalPrinterCollection *ph_printers = nullptr;
         std::string               ph_printer_name;
         if (boost::starts_with(section.first, "print:")) {
             presets = &this->prints;
-            loaded  = &loaded_prints;
             preset_name = section.first.substr(6);
         } else if (boost::starts_with(section.first, "filament:")) {
             presets = &this->filaments;
-            loaded  = &loaded_filaments;
             preset_name = section.first.substr(9);
         } else if (boost::starts_with(section.first, "sla_print:")) {
             presets = &this->sla_prints;
-            loaded  = &loaded_sla_prints;
             preset_name = section.first.substr(10);
         } else if (boost::starts_with(section.first, "sla_material:")) {
             presets = &this->sla_materials;
-            loaded  = &loaded_sla_materials;
             preset_name = section.first.substr(13);
         } else if (boost::starts_with(section.first, "printer:")) {
             presets = &this->printers;
-            loaded  = &loaded_printers;
             preset_name = section.first.substr(8);
         } else if (boost::starts_with(section.first, "physical_printer:")) {
             ph_printers = &this->physical_printers;
-            loaded  = &loaded_physical_printers;
             ph_printer_name = section.first.substr(17);
         } else if (section.first == "presets") {
             // Load the names of the active presets.
@@ -1467,11 +1484,15 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
 
         int operator()(const Preset &preset) const
         {
-            return (! m_prefered_alias.empty() && m_prefered_alias == preset.alias) ?
-                // Matching an alias, always take this preset with priority.
-                std::numeric_limits<int>::max() :
-                // Otherwise take the prefered profile, or the first compatible.
-                preset.name == m_prefered_name;
+            return 
+                preset.is_default || preset.is_external ?
+                    // Don't match any properties of the "-- default --" profile or the external profiles when switching printer profile.
+                    0 :
+                    ! m_prefered_alias.empty() && m_prefered_alias == preset.alias ?
+                        // Matching an alias, always take this preset with priority.
+                        std::numeric_limits<int>::max() :
+                        // Otherwise take the prefered profile, or the first compatible.
+                        preset.name == m_prefered_name;
         }
 
     private:
@@ -1483,11 +1504,14 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
     class PreferedPrintProfileMatch : public PreferedProfileMatch
     {
     public:
-        PreferedPrintProfileMatch(const Preset &preset, const std::string &prefered_name) :
-            PreferedProfileMatch(preset.alias, prefered_name), m_prefered_layer_height(preset.config.opt_float("layer_height")) {}
+        PreferedPrintProfileMatch(const Preset *preset, const std::string &prefered_name) :
+            PreferedProfileMatch(preset ? preset->alias : std::string(), prefered_name), m_prefered_layer_height(preset ? preset->config.opt_float("layer_height") : 0) {}
 
         int operator()(const Preset &preset) const
         {
+            // Don't match any properties of the "-- default --" profile or the external profiles when switching printer profile.
+            if (preset.is_default || preset.is_external)
+                return 0;
             int match_quality = PreferedProfileMatch::operator()(preset);
             if (match_quality < std::numeric_limits<int>::max()) {
                 match_quality += 1;
@@ -1511,6 +1535,9 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
 
         int operator()(const Preset &preset) const
         {
+            // Don't match any properties of the "-- default --" profile or the external profiles when switching printer profile.
+            if (preset.is_default || preset.is_external)
+                return 0;
             int match_quality = PreferedProfileMatch::operator()(preset);
             if (match_quality < std::numeric_limits<int>::max()) {
                 match_quality += 1;
@@ -1528,14 +1555,17 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
     class PreferedFilamentsProfileMatch
     {
     public:
-        PreferedFilamentsProfileMatch(const Preset &preset, const std::vector<std::string> &prefered_names) :
-            m_prefered_alias(preset.alias),
-            m_prefered_filament_type(preset.config.opt_string("filament_type", 0)),
+        PreferedFilamentsProfileMatch(const Preset *preset, const std::vector<std::string> &prefered_names) :
+            m_prefered_alias(preset ? preset->alias : std::string()),
+            m_prefered_filament_type(preset ? preset->config.opt_string("filament_type", 0) : std::string()),
             m_prefered_names(prefered_names)
             {}
 
         int operator()(const Preset &preset) const
         {
+            // Don't match any properties of the "-- default --" profile or the external profiles when switching printer profile.
+            if (preset.is_default || preset.is_external)
+                return 0;
             if (! m_prefered_alias.empty() && m_prefered_alias == preset.alias)
                 // Matching an alias, always take this preset with priority.
                 return std::numeric_limits<int>::max();
@@ -1558,7 +1588,7 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
 		assert(printer_preset.config.has("default_filament_profile"));
         const std::vector<std::string> &prefered_filament_profiles = printer_preset.config.option<ConfigOptionStrings>("default_filament_profile")->values;
         this->prints.update_compatible(printer_preset_with_vendor_profile, nullptr, select_other_print_if_incompatible,
-            PreferedPrintProfileMatch(this->prints.get_edited_preset(), printer_preset.config.opt_string("default_print_profile")));
+            PreferedPrintProfileMatch(this->prints.get_selected_idx() == size_t(-1) ? nullptr : &this->prints.get_edited_preset(), printer_preset.config.opt_string("default_print_profile")));
         const PresetWithVendorProfile   print_preset_with_vendor_profile = this->prints.get_edited_preset_with_vendor_profile();
         // Remember whether the filament profiles were compatible before updating the filament compatibility.
         std::vector<char> 				filament_preset_was_compatible(this->filament_presets.size(), false);
@@ -1568,7 +1598,7 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
         }
         // First select a first compatible profile for the preset editor.
         this->filaments.update_compatible(printer_preset_with_vendor_profile, &print_preset_with_vendor_profile, select_other_filament_if_incompatible,
-            PreferedFilamentsProfileMatch(this->filaments.get_edited_preset(), prefered_filament_profiles));
+            PreferedFilamentsProfileMatch(this->filaments.get_selected_idx() == size_t(-1) ? nullptr : &this->filaments.get_edited_preset(), prefered_filament_profiles));
         if (select_other_filament_if_incompatible != PresetSelectCompatibleType::Never) {
             // Verify validity of the current filament presets.
             const std::string prefered_filament_profile = prefered_filament_profiles.empty() ? std::string() : prefered_filament_profiles.front();
@@ -1595,10 +1625,10 @@ void PresetBundle::update_compatible(PresetSelectCompatibleType select_other_pri
 		assert(printer_preset.config.has("default_sla_print_profile"));
 		assert(printer_preset.config.has("default_sla_material_profile"));
 		this->sla_prints.update_compatible(printer_preset_with_vendor_profile, nullptr, select_other_print_if_incompatible,
-            PreferedPrintProfileMatch(this->sla_prints.get_edited_preset(), printer_preset.config.opt_string("default_sla_print_profile")));
+            PreferedPrintProfileMatch(this->sla_prints.get_selected_idx() == size_t(-1) ? nullptr : &this->sla_prints.get_edited_preset(), printer_preset.config.opt_string("default_sla_print_profile")));
         const PresetWithVendorProfile sla_print_preset_with_vendor_profile = this->sla_prints.get_edited_preset_with_vendor_profile();
 		this->sla_materials.update_compatible(printer_preset_with_vendor_profile, &sla_print_preset_with_vendor_profile, select_other_filament_if_incompatible,
-            PreferedProfileMatch(this->sla_materials.get_edited_preset().alias, printer_preset.config.opt_string("default_sla_material_profile")));
+            PreferedProfileMatch(this->sla_materials.get_selected_idx() == size_t(-1) ? std::string() : this->sla_materials.get_edited_preset().alias, printer_preset.config.opt_string("default_sla_material_profile")));
 		break;
 	}
     default: break;

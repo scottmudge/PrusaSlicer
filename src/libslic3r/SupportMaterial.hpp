@@ -224,7 +224,7 @@ private:
 
 	// Produce the actual G-code.
 	void generate_toolpaths(
-        const PrintObject	&object,
+        SupportLayerPtrs	&support_layers,
         const MyLayersPtr 	&raft_layers,
         const MyLayersPtr   &bottom_contacts,
         const MyLayersPtr   &top_contacts,
@@ -246,7 +246,7 @@ private:
 	bool 				 m_can_merge_support_regions;
 
     coordf_t 			 m_support_layer_height_min;
-	coordf_t		 	 m_support_layer_height_max;
+    // coordf_t		 	 m_support_layer_height_max;
 
 	coordf_t			 m_gap_xy;
 };

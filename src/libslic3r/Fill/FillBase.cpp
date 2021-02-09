@@ -690,6 +690,7 @@ static inline bool interval_inside_interval(double outer_low, double outer_high,
     return inside_interval(outer_low, outer_high, inner_low) && inside_interval(outer_low, outer_high, inner_high);
 }
 
+#if 0
 static inline bool cyclic_interval_inside_interval(double outer_low, double outer_high, double inner_low, double inner_high, double length)
 {
     if (outer_low > outer_high)
@@ -702,6 +703,7 @@ static inline bool cyclic_interval_inside_interval(double outer_low, double oute
     }
     return interval_inside_interval(outer_low, outer_high, inner_low, inner_high, double(SCALED_EPSILON));
 }
+#endif
 
 // #define INFILL_DEBUG_OUTPUT
 
@@ -1129,7 +1131,7 @@ void Fill::connect_infill(Polylines &&infill_ordered, const std::vector<const Po
 			intersection_points.reserve(infill_ordered.size() * 2);
 			for (const Polyline &pl : infill_ordered)
 				for (const Point *pt : { &pl.points.front(), &pl.points.back() }) {
-					EdgeGrid::Grid::ClosestPointResult cp = grid.closest_point(*pt, coord_t(SCALED_EPSILON));
+					EdgeGrid::Grid::ClosestPointResult cp = grid.closest_point_signed_distance(*pt, coord_t(SCALED_EPSILON));
 					if (cp.valid()) {
 						// The infill end point shall lie on the contour.
 						assert(cp.distance <= 3.);
@@ -1170,15 +1172,15 @@ void Fill::connect_infill(Polylines &&infill_ordered, const std::vector<const Po
 					// Add these points to the destination contour.
                     const Polyline  &infill_line = infill_ordered[it->second / 2];
                     const Point     &pt          = (it->second & 1) ? infill_line.points.back() : infill_line.points.front();
-#ifndef NDEBUG
-                    {
-					    const Vec2d pt1 = ipt.cast<double>();
-					    const Vec2d pt2 = (idx_point + 1 == contour_src.size() ? contour_src.points.front() : contour_src.points[idx_point + 1]).cast<double>();
-					    const Vec2d ptx = lerp(pt1, pt2, it->first.t);
-                        assert(std::abs(pt.x() - pt.x()) < SCALED_EPSILON);
-                        assert(std::abs(pt.y() - pt.y()) < SCALED_EPSILON);
-                    }
-#endif // NDEBUG
+//#ifndef NDEBUG
+//                    {
+//					    const Vec2d pt1 = ipt.cast<double>();
+//					    const Vec2d pt2 = (idx_point + 1 == contour_src.size() ? contour_src.points.front() : contour_src.points[idx_point + 1]).cast<double>();
+//                      const Vec2d ptx = lerp(pt1, pt2, it->first.t);
+//                      assert(std::abs(ptx.x() - pt.x()) < SCALED_EPSILON);
+//                      assert(std::abs(ptx.y() - pt.y()) < SCALED_EPSILON);
+//                    }
+//#endif // NDEBUG
                     size_t idx_tjoint_pt = 0;
                     if (idx_point + 1 < contour_src.size() || pt != contour_dst.front()) {
                         if (pt != contour_dst.back())
@@ -1261,8 +1263,6 @@ void Fill::connect_infill(Polylines &&infill_ordered, const std::vector<const Po
 	std::vector<ConnectionCost> connections_sorted;
 	connections_sorted.reserve(infill_ordered.size() * 2 - 2);
 	for (size_t idx_chain = 1; idx_chain < infill_ordered.size(); ++ idx_chain) {
-		const Polyline 						&pl1 			= infill_ordered[idx_chain - 1];
-		const Polyline 						&pl2 			= infill_ordered[idx_chain];
 		const ContourIntersectionPoint		*cp1			= &map_infill_end_point_to_boundary[(idx_chain - 1) * 2 + 1];
 		const ContourIntersectionPoint		*cp2			= &map_infill_end_point_to_boundary[idx_chain * 2];
 		if (cp1->contour_idx != boundary_idx_unconnected && cp1->contour_idx == cp2->contour_idx) {
@@ -1396,7 +1396,6 @@ void Fill::connect_infill(Polylines &&infill_ordered, const std::vector<const Po
         if (! contour_point.consumed && contour_point.contour_idx != boundary_idx_unconnected) {
             const Points              &contour        = boundary[contour_point.contour_idx];
             const std::vector<double> &contour_params = boundary_params[contour_point.contour_idx];
-            const size_t               contour_pt_idx = contour_point.point_idx;
 
             double    lprev         = contour_point.could_connect_prev() ?
                 path_length_along_contour_ccw(contour_point.prev_on_contour, &contour_point, contour_params.back()) :

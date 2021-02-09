@@ -27,20 +27,20 @@ const t_field& OptionsGroup::build_field(const t_config_option_key& id, const Co
     // is the normal type.
     if (opt.gui_type == "select") {
     } else if (opt.gui_type == "select_open") {
-		m_fields.emplace(id, std::move(Choice::Create<Choice>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, Choice::Create<Choice>(this->ctrl_parent(), opt, id));
     } else if (opt.gui_type == "color") {
-		m_fields.emplace(id, std::move(ColourPicker::Create<ColourPicker>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, ColourPicker::Create<ColourPicker>(this->ctrl_parent(), opt, id));
     } else if (opt.gui_type == "f_enum_open" || 
                 opt.gui_type == "i_enum_open" ||
                 opt.gui_type == "i_enum_closed") {
-		m_fields.emplace(id, std::move(Choice::Create<Choice>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, Choice::Create<Choice>(this->ctrl_parent(), opt, id));
     } else if (opt.gui_type == "slider") {
-		m_fields.emplace(id, std::move(SliderCtrl::Create<SliderCtrl>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, SliderCtrl::Create<SliderCtrl>(this->ctrl_parent(), opt, id));
     } else if (opt.gui_type == "i_spin") { // Spinctrl
     } else if (opt.gui_type == "legend") { // StaticText
-		m_fields.emplace(id, std::move(StaticText::Create<StaticText>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, StaticText::Create<StaticText>(this->ctrl_parent(), opt, id));
     } else if (opt.gui_type == "one_string") {
-        m_fields.emplace(id, std::move(TextCtrl::Create<TextCtrl>(this->ctrl_parent(), opt, id)));
+        m_fields.emplace(id, TextCtrl::Create<TextCtrl>(this->ctrl_parent(), opt, id));
     } else { 
         switch (opt.type) {
             case coFloatOrPercent:
@@ -50,21 +50,21 @@ const t_field& OptionsGroup::build_field(const t_config_option_key& id, const Co
 			case coPercents:
 			case coString:
 			case coStrings:
-				m_fields.emplace(id, std::move(TextCtrl::Create<TextCtrl>(this->ctrl_parent(), opt, id)));
+                m_fields.emplace(id, TextCtrl::Create<TextCtrl>(this->ctrl_parent(), opt, id));
                 break;
 			case coBool:
 			case coBools:
-				m_fields.emplace(id, std::move(CheckBox::Create<CheckBox>(this->ctrl_parent(), opt, id)));
+                m_fields.emplace(id, CheckBox::Create<CheckBox>(this->ctrl_parent(), opt, id));
 				break;
 			case coInt:
 			case coInts:
-				m_fields.emplace(id, std::move(SpinCtrl::Create<SpinCtrl>(this->ctrl_parent(), opt, id)));
+                m_fields.emplace(id, SpinCtrl::Create<SpinCtrl>(this->ctrl_parent(), opt, id));
 				break;
             case coEnum:
-				m_fields.emplace(id, std::move(Choice::Create<Choice>(this->ctrl_parent(), opt, id)));
+                m_fields.emplace(id, Choice::Create<Choice>(this->ctrl_parent(), opt, id));
 				break;
             case coPoints:
-				m_fields.emplace(id, std::move(PointCtrl::Create<PointCtrl>(this->ctrl_parent(), opt, id)));
+                m_fields.emplace(id, PointCtrl::Create<PointCtrl>(this->ctrl_parent(), opt, id));
 				break;
             case coNone:   break;
             default:
@@ -250,9 +250,8 @@ void OptionsGroup::activate_line(Line& line)
     if (custom_ctrl)
         m_use_custom_ctrl_as_parent = true;
 
-	// if we have an extra column, build it
-	if (extra_column)
-	{
+    // if we have an extra column, build it
+    if (extra_column) {
 		m_extra_column_item_ptrs.push_back(extra_column(this->ctrl_parent(), line));
 		grid_sizer->Add(m_extra_column_item_ptrs.back(), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 3);
 	}
@@ -309,8 +308,8 @@ void OptionsGroup::activate_line(Line& line)
 	auto sizer = new wxBoxSizer(wxHORIZONTAL);
     if (!custom_ctrl)
         grid_sizer->Add(sizer, 0, wxEXPAND | (staticbox ? wxALL : wxBOTTOM | wxTOP | wxLEFT), staticbox ? 0 : 1);
-	// If we have a single option with no sidetext just add it directly to the grid sizer
-	if (option_set.size() == 1 && option_set.front().opt.sidetext.size() == 0 &&
+    // If we have a single option with no sidetext just add it directly to the grid sizer
+    if (option_set.size() == 1 && option_set.front().opt.sidetext.size() == 0 &&
         option_set.front().opt.label.empty() &&
 		option_set.front().side_widget == nullptr && line.get_extra_widgets().size() == 0) {
 		const auto& option = option_set.front();
@@ -319,16 +318,16 @@ void OptionsGroup::activate_line(Line& line)
         if (!custom_ctrl) {
             if (is_window_field(field))
                 sizer->Add(field->getWindow(), option.opt.full_width ? 1 : 0,
-                    wxBOTTOM | wxTOP | (option.opt.full_width ? wxEXPAND : wxALIGN_CENTER_VERTICAL), (wxOSX || !staticbox) ? 0 : 2);
+                    wxBOTTOM | wxTOP | (option.opt.full_width ? int(wxEXPAND) : int(wxALIGN_CENTER_VERTICAL)), (wxOSX || !staticbox) ? 0 : 2);
             if (is_sizer_field(field))
-                sizer->Add(field->getSizer(), 1, option.opt.full_width ? wxEXPAND : wxALIGN_CENTER_VERTICAL, 0);
+                sizer->Add(field->getSizer(), 1, (option.opt.full_width ? int(wxEXPAND) : int(wxALIGN_CENTER_VERTICAL)), 0);
         }
         return;
 	}
 
     for (auto opt : option_set) {
 		ConfigOptionDef option = opt.opt;
-		wxSizer* sizer_tmp = sizer;
+        wxSizer* sizer_tmp = sizer;
 		// add label if any
 		if (!option.label.empty() && !custom_ctrl) {
 //!			To correct translation by context have to use wxGETTEXT_IN_CONTEXT macro from wxWidget 3.1.1
@@ -899,6 +898,9 @@ boost::any ConfigOptionsGroup::get_config_value(const DynamicPrintConfig& config
         }
         else if (opt_key == "printhost_authorization_type") {
             ret  = static_cast<int>(config.option<ConfigOptionEnum<AuthorizationType>>(opt_key)->value);
+        }
+        else if (opt_key == "brim_type") {
+            ret  = static_cast<int>(config.option<ConfigOptionEnum<BrimType>>(opt_key)->value);
         }
 	}
 		break;

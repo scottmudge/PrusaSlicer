@@ -166,7 +166,7 @@ static ExtrusionEntityCollection traverse_loops(const PerimeterGenerator &perime
                 (float)perimeter_generator.layer_height);
             
             // get overhang paths by checking what parts of this loop fall 
-            // outside the grown lower slices (thus where the distance between
+            // outside the grown lower slices (thus where the distance between
             // the loop centerline and original lower slices is >= half nozzle diameter
             extrusion_paths_append(
                 paths,
@@ -396,11 +396,10 @@ void PerimeterGenerator::process()
     }
 
     // fuzzy skin configuration
-    double fuzzy_skin_thickness;
-    double fuzzy_skin_point_dist;
+    double fuzzy_skin_thickness = scale_(this->object_config->fuzzy_skin_thickness);
+    double fuzzy_skin_point_dist = scale_(this->object_config->fuzzy_skin_point_dist);
     // No reason to de-reference this parameter so many times
 	const FuzzySkinPerimeterMode fuzzy_skin = this->object_config->fuzzy_skin_perimeter_mode.value; 
-
     //FuzzyShape fuzzy_skin_shape;
     if (fuzzy_skin != FuzzySkinPerimeterMode::None) {
         /*
@@ -422,8 +421,6 @@ void PerimeterGenerator::process()
             break;
         }
         */
-        fuzzy_skin_thickness  = scale_(this->object_config->fuzzy_skin_thickness);
-        fuzzy_skin_point_dist = scale_(this->object_config->fuzzy_skin_point_dist);
     }
 
     // we need to process each island separately because we might have different
@@ -606,7 +603,7 @@ void PerimeterGenerator::process()
             // we continue inwards after having finished the brim
             // TODO: add test for perimeter order
             if (this->config->external_perimeters_first || 
-                (this->layer_id == 0 && this->print_config->brim_width.value > 0))
+                (this->layer_id == 0 && this->object_config->brim_width.value > 0))
                 entities.reverse();
             // append perimeters for this slice as a collection
             if (! entities.empty())

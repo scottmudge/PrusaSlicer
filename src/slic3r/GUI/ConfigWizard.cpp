@@ -734,7 +734,7 @@ void PageMaterials::set_compatible_printers_html_window(const std::vector<std::s
             , text_clr_str
             , first_line
             , second_line);
-        for (int i = 0; i < printer_names.size(); ++i)
+        for (size_t i = 0; i < printer_names.size(); ++i)
         {
             text += wxString::Format("<td>%s</td>", boost::nowide::widen(printer_names[i]));
             if (i % 3 == 2) {
@@ -830,7 +830,7 @@ void PageMaterials::update_lists(int sel_printer, int sel_type, int sel_vendor)
                 }
             }
 			if (sel_printers[0] != 0) {
-				for (size_t i = 0; i < sel_printers_count; i++) {
+                for (int i = 0; i < sel_printers_count; i++) {
 					const std::string& printer_name = list_printer->get_data(sel_printers[i]);
 					const Preset* printer = nullptr;
 					for (const Preset* it : materials->printers) {
@@ -881,7 +881,7 @@ void PageMaterials::update_lists(int sel_printer, int sel_type, int sel_vendor)
 		if (sel_printers_count != 0 && sel_type != wxNOT_FOUND) {
 			const std::string& type = list_type->get_data(sel_type);
 			// find printer preset
-			for (size_t i = 0; i < sel_printers_count; i++) {
+            for (int i = 0; i < sel_printers_count; i++) {
 				const std::string& printer_name = list_printer->get_data(sel_printers[i]);
 				const Preset* printer = nullptr;
 				for (const Preset* it : materials->printers) {
@@ -917,7 +917,7 @@ void PageMaterials::update_lists(int sel_printer, int sel_type, int sel_vendor)
 			const std::string& vendor = list_vendor->get_data(sel_vendor);
 			// finst printer preset
             std::vector<ProfilePrintData> to_list;
-			for (size_t i = 0; i < sel_printers_count; i++) {
+            for (int i = 0; i < sel_printers_count; i++) {
 				const std::string& printer_name = list_printer->get_data(sel_printers[i]);
 				const Preset* printer = nullptr;
 				for (const Preset* it : materials->printers) {
@@ -986,7 +986,7 @@ void PageMaterials::sort_list_data(StringList* list, bool add_All_item, bool mat
         
         const ConfigOptionDef* def = print_config_def.get("filament_type");
         std::vector<std::string>enum_values = def->enum_values;
-        int end_of_sorted = 0;
+        size_t end_of_sorted = 0;
         for (size_t vals = 0; vals < enum_values.size(); vals++) {
             for (size_t profs = end_of_sorted; profs < other_profiles.size(); profs++)
             {
@@ -1044,13 +1044,11 @@ void PageMaterials::sort_list_data(PresetList* list, const std::vector<ProfilePr
         return a.name.get() < b.name.get();
         });
     list->Clear();
-    //for (const auto& item : prusa_profiles)
-    for (int i = 0; i < prusa_profiles.size(); ++i) {
+    for (size_t i = 0; i < prusa_profiles.size(); ++i) {
         list->append(std::string(prusa_profiles[i].name) + (prusa_profiles[i].omnipresent ? "" : " *"), &const_cast<std::string&>(prusa_profiles[i].name.get()));
         list->Check(i, prusa_profiles[i].checked);
     }
-    //for (const auto& item : other_profiles)
-    for (int i = 0; i < other_profiles.size(); ++i) {
+    for (size_t i = 0; i < other_profiles.size(); ++i) {
         list->append(std::string(other_profiles[i].name) + (other_profiles[i].omnipresent ? "" : " *"), &const_cast<std::string&>(other_profiles[i].name.get()));
         list->Check(i + prusa_profiles.size(), other_profiles[i].checked);
     }
@@ -1874,7 +1872,7 @@ void ConfigWizard::priv::load_vendors()
 		std::map<std::string, std::string> section_new;
 		if (app_config->has_section(section_name)) {
 			const std::map<std::string, std::string> &section_old = app_config->get_section(section_name);
-			for (const std::pair<std::string, std::string> &material_name_and_installed : section_old)
+            for (const auto& material_name_and_installed : section_old)
 				if (material_name_and_installed.second == "1") {
 					// Material is installed. Resolve it in bundles.
                     size_t num_found = 0;
@@ -2250,7 +2248,7 @@ bool ConfigWizard::priv::check_and_install_missing_materials(Technology technolo
 	            	if ((only_for_model_id.empty() || only_for_model_id == printer_model->id) &&
 	            		printer_models_without_material.find(printer_model) == printer_models_without_material.end()) {
                     	bool has_material = false;
-			            for (const std::pair<std::string, std::string> &preset : appconfig_presets) {
+                        for (const auto& preset : appconfig_presets) {
 			            	if (preset.second == "1") {
 			            		const Preset *material = materials.find_preset(preset.first, false);
 			            		if (material != nullptr && is_compatible_with_printer(PresetWithVendorProfile(*material, nullptr), PresetWithVendorProfile(printer, nullptr))) {

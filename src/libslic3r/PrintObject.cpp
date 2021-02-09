@@ -466,7 +466,8 @@ void PrintObject::ironing()
     if (this->set_started(posIroning)) {
         BOOST_LOG_TRIVIAL(debug) << "Ironing in parallel - start";
         tbb::parallel_for(
-            tbb::blocked_range<size_t>(1, m_layers.size()),
+            // Ironing starting with layer 0 to support ironing all surfaces.
+            tbb::blocked_range<size_t>(0, m_layers.size()),
             [this](const tbb::blocked_range<size_t>& range) {
                 for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++ layer_idx) {
                     m_print->throw_if_canceled();
@@ -568,7 +569,7 @@ SupportLayer* PrintObject::add_support_layer(int id, coordf_t height, coordf_t p
     return m_support_layers.back();
 }
 
-SupportLayerPtrs::const_iterator PrintObject::insert_support_layer(SupportLayerPtrs::const_iterator pos, size_t id, coordf_t height, coordf_t print_z, coordf_t slice_z)
+SupportLayerPtrs::iterator PrintObject::insert_support_layer(SupportLayerPtrs::iterator pos, size_t id, coordf_t height, coordf_t print_z, coordf_t slice_z)
 {
     return m_support_layers.insert(pos, new SupportLayer(id, this, height, print_z, slice_z));
 }
@@ -672,7 +673,11 @@ bool PrintObject::invalidate_state_by_config_options(const std::vector<t_config_
             || opt_key == "first_layer_extrusion_width") {
             steps.emplace_back(posInfill);
         } else if (
+            //FIXME
+            // One likely wants to reslice only when switching between zero infill to simulate boolean difference (subtracting volumes),
+            // normal infill and 100% (solid) infill.
                opt_key == "fill_density"
+            // for perimeter - infill overlap
             || opt_key == "solid_infill_extrusion_width") {
             steps.emplace_back(posPerimeters);
             steps.emplace_back(posPrepareInfill);
@@ -975,7 +980,7 @@ void PrintObject::detect_surfaces_type()
         // Fill in layerm->fill_surfaces by trimming the layerm->slices by the cummulative layerm->fill_surfaces.
         tbb::parallel_for(
             tbb::blocked_range<size_t>(0, m_layers.size()),
-            [this, idx_region, interface_shells](const tbb::blocked_range<size_t>& range) {
+            [this, idx_region](const tbb::blocked_range<size_t>& range) {
                 for (size_t idx_layer = range.begin(); idx_layer < range.end(); ++ idx_layer) {
                     m_print->throw_if_canceled();
                     LayerRegion *layerm = m_layers[idx_layer]->m_regions[idx_region];
@@ -1668,6 +1673,12 @@ PrintRegionConfig PrintObject::region_config_from_model_volume(const PrintRegion
     clamp_exturder_to_default(config.infill_extruder,       num_extruders);
     clamp_exturder_to_default(config.perimeter_extruder,    num_extruders);
     clamp_exturder_to_default(config.solid_infill_extruder, num_extruders);
+    if (config.fill_density.value < 0.00011f)
+        // Switch of infill for very low infill rates, also avoid division by zero in infill generator for these very low rates.
+        // See GH issue #5910.
+        config.fill_density.value = 0;
+    else 
+        config.fill_density.value = std::min(config.fill_density.value, 100.);
     return config;
 }
 
@@ -1695,6 +1706,7 @@ SlicingParameters PrintObject::slicing_parameters(const DynamicPrintConfig& full
 			PrintRegion::collect_object_printing_extruders(
 				print_config,
 				region_config_from_model_volume(default_region_config, nullptr, *model_volume, num_extruders),
+                object_config.brim_type != btNoBrim && object_config.brim_width > 0.,
 				object_extruders);
 			for (const std::pair<const t_layer_height_range, ModelConfig> &range_and_config : model_object.layer_config_ranges)
 				if (range_and_config.second.has("perimeter_extruder") ||
@@ -1703,6 +1715,7 @@ SlicingParameters PrintObject::slicing_parameters(const DynamicPrintConfig& full
 					PrintRegion::collect_object_printing_extruders(
 						print_config,
 						region_config_from_model_volume(default_region_config, &range_and_config.second.get(), *model_volume, num_extruders),
+                        object_config.brim_type != btNoBrim && object_config.brim_width > 0.,
 						object_extruders);
 		}
     sort_remove_duplicates(object_extruders);
@@ -1788,7 +1801,7 @@ void PrintObject::_slice(const std::vector<coordf_t> &layer_height_profile)
             }
             // Make sure all layers contain layer region objects for all regions.
             for (size_t region_id = 0; region_id < this->region_volumes.size(); ++ region_id)
-                layer->add_region(this->print()->regions()[region_id]);
+                layer->add_region(this->print()->get_region(region_id));
             prev = layer;
         }
     }

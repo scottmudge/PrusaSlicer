@@ -117,12 +117,6 @@ void OptionsSearcher::append_options(DynamicPrintConfig* config, Preset::Type ty
     }
 }
 
-// Wrap a string with ColorMarkerStart and ColorMarkerEnd symbols
-static wxString wrap_string(const wxString& str)
-{
-    return wxString::Format("%c%s%c", ImGui::ColorMarkerStart, str, ImGui::ColorMarkerEnd);
-}
-
 // Mark a string using ColorMarkerStart and ColorMarkerEnd symbols
 static std::wstring mark_string(const std::wstring &str, const std::vector<uint16_t> &matches, Preset::Type type, PrinterTechnology pt)
 {
@@ -330,6 +324,53 @@ const Option& OptionsSearcher::get_option(const std::string& opt_key) const
     assert(it != options.end());
 
     return options[it - options.begin()];
+}
+
+static Option create_option(const std::string& opt_key, const wxString& label, Preset::Type type, const GroupAndCategory& gc)
+{
+    wxString suffix;
+    wxString suffix_local;
+    if (gc.category == "Machine limits") {
+        suffix = opt_key.back() == '1' ? L("Stealth") : L("Normal");
+        suffix_local = " " + _(suffix);
+        suffix = " " + suffix;
+    }
+
+    wxString category = gc.category;
+    if (type == Preset::TYPE_PRINTER && category.Contains("Extruder ")) {
+        std::string opt_idx = opt_key.substr(opt_key.find("#") + 1);
+        category = wxString::Format("%s %d", "Extruder", atoi(opt_idx.c_str()) + 1);
+    }
+
+    return Option{ boost::nowide::widen(opt_key), type,
+                (label + suffix).ToStdWstring(), (_(label) + suffix_local).ToStdWstring(),
+                gc.group.ToStdWstring(), _(gc.group).ToStdWstring(),
+                gc.category.ToStdWstring(), GUI::Tab::translate_category(category, type).ToStdWstring() };
+}
+
+Option OptionsSearcher::get_option(const std::string& opt_key, const wxString& label, Preset::Type type) const
+{
+    auto it = std::lower_bound(options.begin(), options.end(), Option({ boost::nowide::widen(opt_key) }));
+    if(it->opt_key == boost::nowide::widen(opt_key))
+        return options[it - options.begin()];
+    if (groups_and_categories.find(opt_key) == groups_and_categories.end()) {
+        size_t pos = opt_key.find('#');
+        if (pos == std::string::npos)
+            return options[it - options.begin()];
+
+        std::string zero_opt_key = opt_key.substr(0, pos + 1) + "0";
+
+        if(groups_and_categories.find(zero_opt_key) == groups_and_categories.end())
+            return options[it - options.begin()];
+
+        return create_option(opt_key, label, type, groups_and_categories.at(zero_opt_key));
+    }
+
+    const GroupAndCategory& gc = groups_and_categories.at(opt_key);
+    if (gc.group.IsEmpty() || gc.category.IsEmpty())
+        return options[it - options.begin()];
+
+    return create_option(opt_key, label, type, gc);
 }
 
 void OptionsSearcher::add_key(const std::string& opt_key, const wxString& group, const wxString& category)

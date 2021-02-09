@@ -21,6 +21,8 @@ add_library(libslic3r STATIC
     BoundingBox.hpp
     BridgeDetector.cpp
     BridgeDetector.hpp
+    Brim.cpp
+    Brim.hpp
     ClipperUtils.cpp
     ClipperUtils.hpp
     Config.cpp
@@ -307,8 +309,6 @@ target_link_libraries(libslic3r
     nowide
     ${EXPAT_LIBRARIES}
     glu-libtess
-    polypartition
-    poly2tri
     qhull
     semver
     TBB::tbb

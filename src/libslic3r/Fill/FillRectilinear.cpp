@@ -515,8 +515,7 @@ static inline bool intersection_on_prev_next_vertical_line_valid(
     const SegmentedIntersectionLine &vline_other = segs[side == SegmentIntersection::Side::Right ? (iVerticalLine + 1) : (iVerticalLine - 1)];
     const SegmentIntersection       &it_other    = vline_other.intersections[iIntersectionOther];
     assert(it_other.is_inner());
-    assert(iIntersectionOther > 0);
-    assert(iIntersectionOther + 1 < vline_other.intersections.size());
+    assert(iIntersectionOther > 0 && size_t(iIntersectionOther + 1) < vline_other.intersections.size());
     // Is iIntersectionOther at the boundary of a vertical segment?
     const SegmentIntersection       &it_other2   = vline_other.intersections[it_other.is_low() ? iIntersectionOther - 1 : iIntersectionOther + 1];
     if (it_other2.is_inner())
@@ -1176,8 +1175,7 @@ static void pinch_contours_insert_phony_outer_intersections(std::vector<Segmente
                     assert(it->type == SegmentIntersection::OUTER_LOW);
                     ++ it;
                 } else {
-                    auto lo  = it;
-                    assert(lo->type == SegmentIntersection::INNER_LOW);
+                    assert(it->type == SegmentIntersection::INNER_LOW);
                     auto hi  = ++ it;
                     assert(hi->type == SegmentIntersection::INNER_HIGH);
                     auto lo2 = ++ it;
@@ -1186,11 +1184,11 @@ static void pinch_contours_insert_phony_outer_intersections(std::vector<Segmente
                         // In that case one shall insert a phony OUTER_HIGH / OUTER_LOW pair.
                         int up = hi->vertical_up();
                         int dn = lo2->vertical_down();
-#ifndef _NDEBUG
+
                         assert(up == -1 || up > 0);
                         assert(dn == -1 || dn >= 0);
                         assert((up == -1 && dn == -1) || (dn + 1 == up));
-#endif // _NDEBUG
+
                         bool pinched = dn + 1 != up;
                         if (pinched) {
                             // hi is not connected with its inner contour to lo2.
@@ -1266,10 +1264,6 @@ static const SegmentIntersection& end_of_vertical_run_raw(const SegmentIntersect
         assert(it->type == SegmentIntersection::INNER_HIGH);
     }
     return *it;
-}
-static SegmentIntersection& end_of_vertical_run_raw(SegmentIntersection &start)
-{
-	return const_cast<SegmentIntersection&>(end_of_vertical_run_raw(std::as_const(start)));
 }
 
 // Find the last INNER_HIGH intersection starting with INNER_LOW, that is followed by OUTER_HIGH intersection, traversing vertical up contours if enabled.
@@ -1383,7 +1377,7 @@ static void traverse_graph_generate_polylines(
         bool 					   try_connect 	= false;
         if (going_up) {
             assert(! it->consumed_vertical_up);
-            assert(i_intersection + 1 < vline.intersections.size());
+            assert(size_t(i_intersection + 1) < vline.intersections.size());
             // Step back to the beginning of the vertical segment to mark it as consumed.
             if (it->is_inner()) {
                 assert(i_intersection > 0);
@@ -1395,7 +1389,7 @@ static void traverse_graph_generate_polylines(
                 it->consumed_vertical_up = true;
                 ++ it;
                 ++ i_intersection;
-                assert(i_intersection < vline.intersections.size());
+                assert(size_t(i_intersection) < vline.intersections.size());
             } while (it->type != SegmentIntersection::OUTER_HIGH);
             if ((it - 1)->is_inner()) {
                 // Step back.
@@ -1815,7 +1809,7 @@ static std::vector<MonotonicRegion> generate_montonous_regions(std::vector<Segme
         return false;
     };
 #else
-    auto test_overlap = [](int, int, int) { return false; };
+    [[maybe_unused]] auto test_overlap = [](int, int, int) { return false; };
 #endif
 
     for (int i_vline_seed = 0; i_vline_seed < int(segs.size()); ++ i_vline_seed) {
@@ -2033,8 +2027,7 @@ static void connect_monotonic_regions(std::vector<MonotonicRegion> &regions, con
 		map_intersection_to_region_end.emplace_back(&segs[region.right.vline].intersections[region.right.low], &region);
 	}
 	auto intersections_lower = [](const MapType &l, const MapType &r){ return l.first < r.first ; };
-	auto intersections_equal = [](const MapType &l, const MapType &r){ return l.first == r.first ; };
-	std::sort(map_intersection_to_region_start.begin(), map_intersection_to_region_start.end(), intersections_lower);
+    std::sort(map_intersection_to_region_start.begin(), map_intersection_to_region_start.end(), intersections_lower);
 	std::sort(map_intersection_to_region_end.begin(), map_intersection_to_region_end.end(), intersections_lower);
 
 	// Scatter links to neighboring regions.
@@ -2185,15 +2178,15 @@ static std::vector<MonotonicRegionLink> chain_monotonic_regions(
 	float best_path_length = std::numeric_limits<float>::max();
 
 	struct NextCandidate {
-        MonotonicRegion    *region;
+        MonotonicRegion    *region = nullptr;
         AntPath  	        *link;
         AntPath  	        *link_flipped;
         float                probability;
-		bool 		         dir;
+        bool 		         dir = false;
 	};
 	std::vector<NextCandidate> next_candidates;
 
-    auto validate_unprocessed = 
+    [[maybe_unused]]auto validate_unprocessed =
 #ifdef NDEBUG
         []() { return true; };
 #else
@@ -2222,7 +2215,7 @@ static std::vector<MonotonicRegionLink> chain_monotonic_regions(
                 } else {
                     // Some left neihgbor should not be processed yet.
                     assert(left_neighbors_unprocessed[i] > 1);
-                    size_t num_predecessors_unprocessed = 0;
+                    int32_t num_predecessors_unprocessed = 0;
                     bool   has_left_last_on_path       = false;
                     for (const MonotonicRegion* left : region.left_neighbors) {
                         size_t iprev = left - regions.data();
@@ -2252,22 +2245,22 @@ static std::vector<MonotonicRegionLink> chain_monotonic_regions(
 #endif /* NDEBUG */
 
 	// How many times to repeat the ant simulation (number of ant generations).
-	constexpr int   num_rounds = 25;
+	constexpr int const   num_rounds = 25;
 	// After how many rounds without an improvement to exit?
-	constexpr int 	num_rounds_no_change_exit = 8;
+	constexpr int const   num_rounds_no_change_exit = 8;
 	// With how many ants each of the run will be performed?
-	const int   	num_ants = std::min(int(regions.size()), 10);
+	const int             num_ants = std::min(int(regions.size()), 10);
 	// Base (initial) pheromone level. This value will be adjusted based on the length of the first greedy path found.
-	float           pheromone_initial_deposit = 0.5f;
+	float                 pheromone_initial_deposit = 0.5f;
 	// Evaporation rate of pheromones.
-	constexpr float pheromone_evaporation = 0.1f;
+	constexpr float const pheromone_evaporation = 0.1f;
     // Evaporation rate to diversify paths taken by individual ants.
-    constexpr float pheromone_diversification = 0.1f;
+    constexpr float const pheromone_diversification = 0.1f;
 	// Probability at which to take the next best path. Otherwise take the the path based on the cost distribution.
-	constexpr float probability_take_best = 0.9f;
+	constexpr float const probability_take_best = 0.9f;
 	// Exponents of the cost function.
-	constexpr float pheromone_alpha = 1.f; // pheromone exponent
-	constexpr float pheromone_beta  = 2.f; // attractiveness weighted towards edge length
+	constexpr float const pheromone_alpha = 1.f; // pheromone exponent
+	constexpr float const pheromone_beta  = 2.f; // attractiveness weighted towards edge length
 
     AntPathMatrix path_matrix(regions, poly_with_offset, segs, pheromone_initial_deposit);
 
@@ -2290,8 +2283,7 @@ static std::vector<MonotonicRegionLink> chain_monotonic_regions(
 			NextCandidate 				 next_candidate;
 			next_candidate.probability = 0;
 			for (MonotonicRegion *next : region.right_neighbors) {
-				int &unprocessed = left_neighbors_unprocessed[next - regions.data()];
-				assert(unprocessed > 1);
+                assert(left_neighbors_unprocessed[next - regions.data()] > 1);
 				if (left_neighbors_unprocessed[next - regions.data()] == 2) {
 					// Dependencies of the successive blocks are satisfied.
                     AntPath &path1 = path_matrix(region, dir, *next, false);
@@ -2325,6 +2317,7 @@ static std::vector<MonotonicRegionLink> chain_monotonic_regions(
                 queue.pop_back();
             }
 			// Extend the path.
+            assert(next_candidate.region);
 			MonotonicRegion *next_region = next_candidate.region;
 			bool              next_dir    = next_candidate.dir;
             total_length += next_region->length(next_dir) + path_matrix(*path_end.region, path_end.flipped, *next_region, next_dir).length;
@@ -2844,8 +2837,6 @@ bool FillRectilinear::fill_surface_by_multilines(const Surface *surface, FillPar
     coord_t line_spacing = coord_t(scale_(this->spacing) / params.density);
     std::pair<float, Point> rotate_vector = this->_infill_direction(surface);
     for (const SweepParams &sweep : sweep_params) {
-        size_t n_fill_lines_initial = fill_lines.size();
-
         // Rotate polygons so that we can work with vertical lines here
         double angle = rotate_vector.first + sweep.angle_base;
         ExPolygonWithOffset poly_with_offset(poly_with_offset_base, - angle);

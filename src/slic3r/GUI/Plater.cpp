@@ -274,7 +274,7 @@ public:
     wxButton*       get_wiping_dialog_button() { return m_wiping_dialog_button; }
     wxSizer*        get_sizer() override;
     ConfigOptionsGroup* get_og(const bool is_fff);
-    void            Show(const bool is_fff);
+    void            Show(const bool is_fff) override;
 
     void            msw_rescale();
 };
@@ -1065,18 +1065,29 @@ void Sidebar::show_info_sizer()
 
     const auto& stats = model_object->get_object_stl_stats();//model_object->volumes.front()->mesh.stl.stats;
     p->object_info->info_volume->SetLabel(wxString::Format("%.2f", stats.volume*pow(koef,3)));
-    p->object_info->info_facets->SetLabel(wxString::Format(_L("%d (%d shells)"), static_cast<int>(model_object->facets_count()), stats.number_of_parts));
+    p->object_info->info_facets->SetLabel(format_wxstr(_L_PLURAL("%1% (%2$d shell)", "%1% (%2$d shells)", stats.number_of_parts),
+                                                       static_cast<int>(model_object->facets_count()), stats.number_of_parts));
 
     int errors = stats.degenerate_facets + stats.edges_fixed + stats.facets_removed +
         stats.facets_added + stats.facets_reversed + stats.backwards_edges;
     if (errors > 0) {
-        wxString tooltip = wxString::Format(_L("Auto-repaired (%d errors)"), errors);
+        wxString tooltip = format_wxstr(_L_PLURAL("Auto-repaired %1$d error", "Auto-repaired %1$d errors", errors), errors);
         p->object_info->info_manifold->SetLabel(tooltip);
 
-        tooltip += ":\n" + wxString::Format(_L("%d degenerate facets, %d edges fixed, %d facets removed, "
-                                        "%d facets added, %d facets reversed, %d backwards edges"),
-                                        stats.degenerate_facets, stats.edges_fixed, stats.facets_removed,
-                                        stats.facets_added, stats.facets_reversed, stats.backwards_edges);
+        tooltip += ":\n";
+        if (stats.degenerate_facets > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d degenerate facet", "%1$d degenerate facets", stats.degenerate_facets), stats.degenerate_facets) + ", ";
+        if (stats.edges_fixed > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d edge fixed", "%1$d edges fixed", stats.edges_fixed), stats.edges_fixed) + ", ";
+        if (stats.facets_removed > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d facet removed", "%1$d facets removed", stats.facets_removed), stats.facets_removed) + ", ";
+        if (stats.facets_added > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d facet added", "%1$d facets added", stats.facets_added), stats.facets_added) + ", ";
+        if (stats.facets_reversed > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d facet reversed", "%1$d facets reversed", stats.facets_reversed), stats.facets_reversed) + ", ";
+        if (stats.backwards_edges > 0)
+            tooltip += format_wxstr(_L_PLURAL("%1$d backwards edge", "%1$d backwards edges", stats.backwards_edges), stats.backwards_edges) + ", ";
+        tooltip.RemoveLast(2);//remove last coma
 
         p->object_info->showing_manifold_warning_icon = true;
         p->object_info->info_manifold->SetToolTip(tooltip);
@@ -1107,7 +1118,7 @@ void Sidebar::update_sliced_info_sizer()
             wxString new_label = _L("Used Material (ml)") + ":";
             const bool is_supports = ps.support_used_material > 0.0;
             if (is_supports)
-                new_label += format_wxstr("\n    - %s\n    - %s", _L("object(s)"), _L("supports and pad"));
+                new_label += format_wxstr("\n    - %s\n    - %s", _L_PLURAL("object", "objects", p->plater->model().objects.size()), _L("supports and pad"));
 
             wxString info_text = is_supports ?
                 wxString::Format("%.2f \n%.2f \n%.2f", (ps.objects_used_material + ps.support_used_material) / 1000,
@@ -1924,7 +1935,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     , main_frame(main_frame)
     , config(Slic3r::DynamicPrintConfig::new_from_defaults_keys({
         "bed_shape", "bed_custom_texture", "bed_custom_model", "complete_objects", "duplicate_distance", "extruder_clearance_radius", "skirts", "skirt_distance",
-        "brim_width", "variable_layer_height", "nozzle_diameter", "single_extruder_multi_material",
+        "brim_width", "brim_offset", "brim_type", "variable_layer_height", "nozzle_diameter", "single_extruder_multi_material",
         "wipe_tower", "wipe_tower_x", "wipe_tower_y", "wipe_tower_width", "wipe_tower_rotation_angle",
         "extruder_colour", "filament_colour", "max_print_height", "printer_model", "printer_technology",
         // These values are necessary to construct SlicingParameters by the Canvas3D variable layer height editor.
@@ -2054,7 +2065,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     view3D_canvas->Bind(EVT_GLCANVAS_UPDATE_BED_SHAPE, [q](SimpleEvent&) { q->set_bed_shape(); });
 
     // Preview events:
-    preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_QUESTION_MARK, [this](SimpleEvent&) { wxGetApp().keyboard_shortcuts(); });
+    preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_QUESTION_MARK, [](SimpleEvent&) { wxGetApp().keyboard_shortcuts(); });
     preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_UPDATE_BED_SHAPE, [q](SimpleEvent&) { q->set_bed_shape(); });
     if (wxGetApp().is_editor()) {
         preview->get_wxglcanvas()->Bind(EVT_GLCANVAS_TAB, [this](SimpleEvent&) { select_next_view_3D(); });
@@ -2116,8 +2127,8 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
     if (wxGetApp().is_editor()) {
         this->q->Bind(EVT_EJECT_DRIVE_NOTIFICAION_CLICKED, [this](EjectDriveNotificationClickedEvent&) { this->q->eject_drive(); });
         this->q->Bind(EVT_EXPORT_GCODE_NOTIFICAION_CLICKED, [this](ExportGcodeNotificationClickedEvent&) { this->q->export_gcode(true); });
-        this->q->Bind(EVT_PRESET_UPDATE_AVAILABLE_CLICKED, [this](PresetUpdateAvailableClickedEvent&) {  wxGetApp().get_preset_updater()->on_update_notification_confirm(); });
-	    this->q->Bind(EVT_REMOVABLE_DRIVE_EJECTED, [this, q](RemovableDriveEjectEvent &evt) {
+        this->q->Bind(EVT_PRESET_UPDATE_AVAILABLE_CLICKED, [](PresetUpdateAvailableClickedEvent&) {  wxGetApp().get_preset_updater()->on_update_notification_confirm(); });
+        this->q->Bind(EVT_REMOVABLE_DRIVE_EJECTED, [this](RemovableDriveEjectEvent &evt) {
 		    if (evt.data.second) {
 			    this->show_action_buttons(this->ready_to_slice);
                 notification_manager->close_notification_of_type(NotificationType::ExportFinished);
@@ -2132,7 +2143,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
                     );
             }
 	    });
-        this->q->Bind(EVT_REMOVABLE_DRIVES_CHANGED, [this, q](RemovableDrivesChangedEvent &) {
+        this->q->Bind(EVT_REMOVABLE_DRIVES_CHANGED, [this](RemovableDrivesChangedEvent &) {
 		    this->show_action_buttons(this->ready_to_slice); 
 		    // Close notification ExportingFinished but only if last export was to removable
 		    notification_manager->device_ejected();
@@ -2404,17 +2415,30 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
             auto convert_from_imperial_units = [](Model& model, bool only_small_volumes) {
                 model.convert_from_imperial_units(only_small_volumes);
 //                wxGetApp().app_config->set("use_inches", "1");
-                wxGetApp().sidebar().update_ui_from_settings();
+//                wxGetApp().sidebar().update_ui_from_settings();
             };
 
             if (!is_project_file) {
                 if (imperial_units)
                     // Convert even if the object is big.
                     convert_from_imperial_units(model, false);
+                else if (model.looks_like_saved_in_meters()) {
+                    wxMessageDialog msg_dlg(q, format_wxstr(_L_PLURAL(
+                        "The object in file %s looks like saved in meters.\n"
+                        "Should I consider it as a saved in meters and convert it?",
+                        "Some objects in file %s look like saved in meters.\n"
+                        "Should I consider them as a saved in meters and convert them?", model.objects.size()), from_path(filename)) + "\n",
+                        _L("The object appears to be saved in meters"), wxICON_WARNING | wxYES | wxNO);
+                    if (msg_dlg.ShowModal() == wxID_YES)
+                        //FIXME up-scale only the small parts?
+                        model.convert_from_meters(true);
+                }
                 else if (model.looks_like_imperial_units()) {
-                    wxMessageDialog msg_dlg(q, format_wxstr(_L(
-                        "Some object(s) in file %s looks like saved in inches.\n"
-                        "Should I consider them as a saved in inches and convert them?"), from_path(filename)) + "\n",
+                    wxMessageDialog msg_dlg(q, format_wxstr(_L_PLURAL(
+                        "The object in file %s looks like saved in inches.\n"
+                        "Should I consider it as a saved in inches and convert it?",
+                        "Some objects in file %s look like saved in inches.\n"
+                        "Should I consider them as a saved in inches and convert them?", model.objects.size()), from_path(filename)) + "\n",
                         _L("The object appears to be saved in inches"), wxICON_WARNING | wxYES | wxNO);
                     if (msg_dlg.ShowModal() == wxID_YES)
                         //FIXME up-scale only the small parts?
@@ -2524,7 +2548,7 @@ std::vector<size_t> Plater::priv::load_model_objects(const ModelObjectPtrs &mode
     const Vec3d bed_size = Slic3r::to_3d(bed_shape.size().cast<double>(), 1.0) - 2.0 * Vec3d::Ones();
 
 #ifndef AUTOPLACEMENT_ON_LOAD
-    bool need_arrange = false;
+    // bool need_arrange = false;
 #endif /* AUTOPLACEMENT_ON_LOAD */
     bool scaled_down = false;
     std::vector<size_t> obj_idxs;
@@ -2544,7 +2568,7 @@ std::vector<size_t> Plater::priv::load_model_objects(const ModelObjectPtrs &mode
             new_instances.emplace_back(object->add_instance());
 #else /* AUTOPLACEMENT_ON_LOAD */
             // if object has no defined position(s) we need to rearrange everything after loading
-            need_arrange = true;
+            // need_arrange = true;
              // add a default instance and center object around origin
             object->center_around_origin();  // also aligns object to Z = 0
             ModelInstance* instance = object->add_instance();
@@ -3309,6 +3333,8 @@ void Plater::priv::reload_from_disk()
                     new_volume->translate(new_volume->get_transformation().get_matrix(true) * (new_volume->source.mesh_offset - old_volume->source.mesh_offset));
                     if (old_volume->source.is_converted_from_inches)
                         new_volume->convert_from_imperial_units();
+                    new_volume->supported_facets.assign(old_volume->supported_facets);
+                    new_volume->seam_facets.assign(old_volume->seam_facets);
                     std::swap(old_model_object->volumes[sel_v.volume_idx], old_model_object->volumes.back());
                     old_model_object->delete_volume(old_model_object->volumes.size() - 1);
                     old_model_object->ensure_on_bed();
@@ -3687,9 +3713,8 @@ bool Plater::priv::warnings_dialog()
 	if (current_warnings.empty())
 		return true;
 	std::string text = _u8L("There are active warnings concerning sliced models:") + "\n";
-	bool empt = true;
 	for (auto const& it : current_warnings) {
-		int next_n = it.first.message.find_first_of('\n', 0);
+        size_t next_n = it.first.message.find_first_of('\n', 0);
 		text += "\n";
 		if (next_n != std::string::npos)
 			text += it.first.message.substr(0, next_n);
@@ -4949,7 +4974,7 @@ ProjectDropDialog::ProjectDropDialog(const std::string& filename)
 
     wxBoxSizer* bottom_sizer = new wxBoxSizer(wxHORIZONTAL);
     wxCheckBox* check = new wxCheckBox(this, wxID_ANY, _L("Don't show again"));
-    check->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent& evt) {
+    check->Bind(wxEVT_CHECKBOX, [](wxCommandEvent& evt) {
         wxGetApp().app_config->set("show_drop_project_dialog", evt.IsChecked() ? "0" : "1");
         });
 
@@ -5050,6 +5075,10 @@ bool Plater::load_files(const wxArrayString& filenames)
                 std::vector<fs::path> in_paths;
                 in_paths.emplace_back(*it);
                 load_files(in_paths, false, true);
+                break;
+            }
+            case LoadType::Unknown : {
+                assert(false);
                 break;
             }
             }
@@ -5925,7 +5954,6 @@ void Plater::force_print_bed_update()
 void Plater::on_activate()
 {
 #if defined(__linux__) || defined(_WIN32)
-    wxWindow *focus_window = wxWindow::FindFocus();
     // Activating the main frame, and no window has keyboard focus.
     // Set the keyboard focus to the visible Canvas3D.
     if (this->p->view3D->IsShown() && wxWindow::FindFocus() != this->p->view3D->get_wxglcanvas())

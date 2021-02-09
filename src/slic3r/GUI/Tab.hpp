@@ -112,6 +112,7 @@ protected:
 	const wxString		m_title;
 	TabPresetComboBox*	m_presets_choice;
 	ScalableButton*		m_search_btn;
+	ScalableButton*		m_btn_compare_preset;
 	ScalableButton*		m_btn_save_preset;
 	ScalableButton*		m_btn_delete_preset;
 	ScalableButton*		m_btn_edit_ph_printer {nullptr};
@@ -290,6 +291,7 @@ public:
 	void		OnTreeSelChange(wxTreeEvent& event);
 	void		OnKeyDown(wxKeyEvent& event);
 
+	void		compare_preset();
 	void		save_preset(std::string name = std::string(), bool detach = false);
 	void		delete_preset();
 	void		toggle_show_hide_incompatible();
@@ -381,7 +383,6 @@ public:
 private:
 	ogStaticText*	m_recommended_thin_wall_thickness_description_line = nullptr;
 	ogStaticText*	m_top_bottom_shell_thickness_explanation = nullptr;
-	bool			m_support_material_overhangs_queried = false;
 };
 
 class TabFilament : public Tab
@@ -456,7 +457,7 @@ public:
     void        update_pages(); // update m_pages according to printer technology
 	void		extruders_count_changed(size_t extruders_count);
 	PageShp		build_kinematics_page();
-	void		build_unregular_pages();
+	void		build_unregular_pages(bool from_initial_build = false);
 	void		on_preset_loaded() override;
 	void		init_options_list() override;
 	void		msw_rescale() override;
