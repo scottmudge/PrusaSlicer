@@ -215,11 +215,12 @@ void PrintObject::planar_bulging_compensation() {
         // Keep track of which layers were already modified... just in case some are close together.
         std::vector<bool> layer_updated(this->layer_count(), false);
 
-        // Go through and adjust layers
+        // Go through and adjust layers, increase width/XY-size below layer, decrease above
         for (const std::pair<size_t, size_t>& ent : flat_surface_idxs) {
-            const size_t search_distance = ent.second;
+            const size_t low_bound = (size_t)roundf(1.35f * (float)ent.second);
+            const size_t high_bound = (size_t)roundf(0.35f * (float)ent.second);
 
-            for (int i = -(int)(search_distance); i <= (int)search_distance; i++) {
+            for (int i = -(int)(low_bound); i < high_bound; i++) {
                 if (i == 0) continue; // We don't want to modify the actual top layer.
 
                 const int lidx = ent.first + i;
@@ -228,8 +229,11 @@ void PrintObject::planar_bulging_compensation() {
                 if (lidx < (int)PlanarBulgeDistFromSurface) continue;
                 if (lidx > (this->layer_count() - (int)PlanarBulgeDistFromSurface)) continue;
 
+                // Absolute distance across entire range
+                const int dist = (int)abs(i) + (int)low_bound;
+
                 this->m_layers[lidx]->lslices = offset_ex(this->m_layers[lidx]->lslices, 
-                    -1.0f * LinearlyDecayedCompensation((int)abs(i), search_distance));
+                   ((i < 0) ? 1.0f : -1.0f) * LinearlyDecayedCompensation(dist, (int)(low_bound + high_bound)));
 				layer_updated[lidx] = true;
             }
         }
