@@ -92,10 +92,19 @@ if (MSVC)
     # Disable STL4007: Many result_type typedefs and all argument_type, first_argument_type, and second_argument_type typedefs are deprecated in C++17.
     #FIXME Remove this line after eigen library adapts to the new C++17 adaptor rules.
     add_compile_options(-D_SILENCE_CXX17_ADAPTOR_TYPEDEFS_DEPRECATION_WARNING)
+    # Disable warnings on conversion from unsigned to signed (possible loss of data)
+    # C4244: 'conversion' conversion from 'type1' to 'type2', possible loss of data. An integer type is converted to a smaller integer type.
+    # C4267: The compiler detected a conversion from size_t to a smaller type.
+    add_compile_options(/wd4244 /wd4267)
 endif ()
 
 if (MINGW)
     add_compile_options(-Wa,-mbig-obj)
+endif ()
+
+if (NOT MSVC)
+    # ARMs (Raspberry PI) use an unsigned char by default. Let's make it consistent for PrusaSlicer on all platforms.
+    add_compile_options(-fsigned-char)
 endif ()
 
 # Display and check CMAKE_PREFIX_PATH
@@ -249,6 +258,9 @@ if(WIN32)
     if(MSVC)
         # BOOST_ALL_NO_LIB: Avoid the automatic linking of Boost libraries on Windows. Rather rely on explicit linking.
         add_definitions(-DBOOST_ALL_NO_LIB -DBOOST_USE_WINAPI_VERSION=0x601 -DBOOST_SYSTEM_USE_UTF8 )
+        # Force the source code encoding to UTF-8. See PrusaSlicer GH pull request #5583
+        add_compile_options("$<$<C_COMPILER_ID:MSVC>:/utf-8>")
+        add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     endif(MSVC)
 endif(WIN32)
 
@@ -285,10 +297,9 @@ if(SLIC3R_STATIC)
 endif()
 #set(Boost_DEBUG ON)
 # set(Boost_COMPILER "-mgw81")
-if(NOT WIN32)
-    # boost::process was introduced first in version 1.64.0
-    set(MINIMUM_BOOST_VERSION "1.64.0")
-endif()
+# boost::process was introduced first in version 1.64.0,
+# boost::beast::detail::base64 was introduced first in version 1.66.0
+set(MINIMUM_BOOST_VERSION "1.66.0")
 set(_boost_components "system;filesystem;thread;log;locale;regex;chrono;atomic;date_time")
 find_package(Boost ${MINIMUM_BOOST_VERSION} REQUIRED COMPONENTS ${_boost_components})
 

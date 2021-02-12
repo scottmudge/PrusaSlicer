@@ -19,8 +19,6 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/filesystem/operations.hpp>
-#include <boost/nowide/fstream.hpp>
-#include <boost/nowide/cstdio.hpp>
 #include <boost/spirit/include/karma.hpp>
 #include <boost/log/trivial.hpp>
 
@@ -117,6 +115,7 @@ static constexpr const char* SOURCE_OFFSET_X_KEY = "source_offset_x";
 static constexpr const char* SOURCE_OFFSET_Y_KEY = "source_offset_y";
 static constexpr const char* SOURCE_OFFSET_Z_KEY = "source_offset_z";
 static constexpr const char* SOURCE_IN_INCHES    = "source_in_inches";
+static constexpr const char* SOURCE_IN_METERS    = "source_in_meters";
 
 const unsigned int VALID_OBJECT_TYPES_COUNT = 1;
 const char* VALID_OBJECT_TYPES[] =
@@ -1915,6 +1914,8 @@ namespace Slic3r {
                     volume->source.mesh_offset(2) = ::atof(metadata.value.c_str());
                 else if (metadata.key == SOURCE_IN_INCHES)
                     volume->source.is_converted_from_inches = metadata.value == "1";
+                else if (metadata.key == SOURCE_IN_METERS)
+                    volume->source.is_converted_from_meters = metadata.value == "1";
                 else
                     volume->config.set_deserialize(metadata.key, metadata.value);
             }
@@ -2824,6 +2825,8 @@ namespace Slic3r {
                                 }
                                 if (volume->source.is_converted_from_inches)
                                     stream << prefix << SOURCE_IN_INCHES << "\" " << VALUE_ATTR << "=\"1\"/>\n";
+                                if (volume->source.is_converted_from_meters)
+                                    stream << prefix << SOURCE_IN_METERS << "\" " << VALUE_ATTR << "=\"1\"/>\n";
                             }
 
                             // stores volume's config data
